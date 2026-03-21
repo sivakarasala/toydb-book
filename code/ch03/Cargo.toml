@@ -1,0 +1,16 @@
+[package]
+name = "ch03-bitcask"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "1"
+crc32fast = "1"
+
+[[bin]]
+name = "exercise"
+path = "src/main.rs"
+
+[[bin]]
+name = "solution"
+path = "src/bin/solution.rs"
