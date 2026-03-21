@@ -522,7 +522,7 @@ let counter = Mutex::new(0);
 
 The `lock()` method returns a **guard**. The guard gives you access to the data inside the mutex. When the guard is dropped (goes out of scope), the lock is automatically released. You never need to manually "unlock" -- Rust handles it for you.
 
-### Step 3: Combine them -- Arc<Mutex<T>>
+### Step 3: Combine them -- `Arc<Mutex<T>>`
 
 To share mutable data across async tasks, you combine both:
 

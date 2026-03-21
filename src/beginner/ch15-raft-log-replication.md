@@ -111,7 +111,7 @@ The `lock()` method returns a **guard** (`MutexGuard`). The guard gives you acce
 >
 > The `.unwrap()` handles the case where a thread panicked while holding the lock (the mutex is "poisoned"). For our purposes, unwrap is fine.
 
-### Combining them: Arc<Mutex<T>>
+### Combining them: `Arc<Mutex<T>>`
 
 To share mutable data across tasks:
 
