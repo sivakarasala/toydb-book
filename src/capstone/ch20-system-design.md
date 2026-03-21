@@ -166,6 +166,53 @@ Shuffle:         ★★☆☆☆  Expensive but universal
 | **100 TB, 10K QPS** | 30+ nodes. Learner replicas for read scaling. Range rebalancing for hotspot management. |
 | **1 PB, 100K QPS** | 100+ nodes. Multi-region replication. Follower reads for geographic locality. Dedicated query coordinators. |
 
+**4. Rebalancing and Hotspot Management**
+
+Even with range partitioning, some ranges get more traffic than others. A range containing `users` table rows for a popular region might receive 10x the queries of other ranges. Three mechanisms handle this:
+
+**Range splitting.** When a range exceeds a size threshold (e.g., 512 MB) or a QPS threshold, split it into two ranges. Each half gets its own Raft group. The split point is chosen to divide the data evenly — typically the median key.
+
+**Leader rebalancing.** Raft leaders handle all writes and (in our design) all reads for their range. If one node hosts leaders for many ranges, it becomes a bottleneck. The rebalancer moves Raft leadership from overloaded nodes to underloaded nodes by triggering leader transfer.
+
+```
+Before rebalancing:
+  Node 1: Leader of ranges 1, 2, 3, 4  (overloaded)
+  Node 2: Leader of range 5
+  Node 3: Leader of range 6
+
+After rebalancing:
+  Node 1: Leader of ranges 1, 2
+  Node 2: Leader of ranges 3, 5
+  Node 3: Leader of ranges 4, 6
+```
+
+**Range merging.** If adjacent ranges both shrink below a threshold (e.g., due to mass deletes), merge them back into a single range. This reduces the number of Raft groups and the associated overhead (each group has election timers, heartbeats, and log replication).
+
+**Connection to toydb:** Our single Raft group handles all data. At scale, you instantiate thousands of groups and add a management layer. The Raft protocol is unchanged — the orchestration is new.
+
+**5. Schema Management**
+
+Unlike a key-value store, a SQL database must manage schemas: table definitions, column types, indexes, and constraints. In a distributed system, schema changes must be coordinated across all nodes.
+
+```
+Schema change: ALTER TABLE users ADD COLUMN email TEXT
+
+Challenge:
+  - Node A applies the schema change at time T1
+  - Node B hasn't received it yet
+  - A query on Node A expects the email column to exist
+  - A query on Node B does not know about it
+```
+
+CockroachDB uses an online schema change protocol inspired by Google's F1:
+
+1. The schema change is versioned and replicated via Raft.
+2. All nodes transition through an intermediate state: "delete-only" (the column exists for deletes but not reads or inserts) → "write-only" (the column accepts writes but is not readable) → "public" (the column is fully available).
+3. Each transition is replicated via Raft, ensuring all nodes go through the same sequence.
+4. Backfill operations (populating default values for existing rows) run in the background.
+
+This protocol ensures that at any moment, all nodes are within one version of each other. Two adjacent versions are always compatible — a query from version N can safely execute on a node at version N+1.
+
 ### Trade-offs
 
 | Decision | Chosen | Alternative | Why |
@@ -175,6 +222,7 @@ Shuffle:         ★★☆☆☆  Expensive but universal
 | 2PC for distributed txns | Two-phase commit | Saga pattern | 2PC gives ACID guarantees; Sagas give eventual consistency |
 | Timestamp oracle | Centralized service | Hybrid logical clocks | Simpler; HLC avoids single point of failure but adds complexity |
 | PostgreSQL wire protocol | Compatible | Custom protocol | Ecosystem compatibility outweighs protocol overhead |
+| Online schema changes | F1-style versioned transitions | Lock-the-table (offline DDL) | Zero downtime for schema changes at the cost of protocol complexity |
 
 ### What We Learned Building toydb That Applies Here
 
@@ -338,7 +386,21 @@ Only the right subtree needs synchronization.
 | LWW conflict resolution | Timestamp-based | Vector clocks | Simpler; acceptable for most use cases |
 | Virtual nodes | 200 per physical node | Static assignment | Even distribution, easy rebalancing |
 
-**4. Storage Engine: LSM Trees**
+**4. Hot Key Handling**
+
+A hot key is a single key that receives disproportionate traffic — for example, a viral post's like counter or a popular product's inventory. Consistent hashing assigns each key to one partition, so a hot key overwhelms a single node.
+
+Three strategies:
+
+**Request coalescing.** Multiple reads for the same key within a short window (e.g., 10ms) are batched into one storage read. The result is shared across all waiting requests. This reduces storage load proportionally to the number of concurrent requests for the same key.
+
+**Key splitting.** Split a hot key into N sub-keys: `hot_key/0`, `hot_key/1`, ..., `hot_key/N-1`. Reads are randomly routed to any sub-key. Writes update all sub-keys. For counters, each sub-key holds a partial count; the total is the sum. This is essentially the G-Counter CRDT pattern from Chapter 19 (Problem 8).
+
+**Local caching with TTL.** Cache the hot key's value in every node's local memory with a short TTL (1-5 seconds). Reads hit local memory; cache misses go to storage. For a key read 10,000 times per second, a 1-second TTL reduces storage reads from 10,000 to 1 per second per node.
+
+DynamoDB Accelerator (DAX) implements local caching as a separate service layer. Redis Cluster uses key splitting for its `INCR` command under high contention. Both approaches are valid; the choice depends on whether you control the application code (local caching is transparent) or need a general solution (key splitting requires application changes).
+
+**5. Storage Engine: LSM Trees**
 
 A key-value store at this scale typically uses an LSM (Log-Structured Merge) tree rather than a B-tree. The reason: write amplification. A B-tree updates pages in place, which requires random I/O. An LSM tree batches writes in memory (a memtable), flushes them to sorted files on disk (SSTables), and periodically merges files in the background (compaction).
 
@@ -1013,6 +1075,76 @@ For every decision:
 | Over-engineering | Microservices for 100 users is a red flag | Start simple, scale when numbers demand it |
 | No monitoring discussion | Shows lack of production experience | Always mention metrics and alerting |
 | Ignoring failure modes | Every distributed system will fail | Discuss what happens when each component goes down |
+
+---
+
+## Cross-Cutting Concerns
+
+Several topics appear in every system design but do not fit neatly into a single design. Here is how to discuss them.
+
+### Monitoring and Observability
+
+Every distributed system needs three pillars of observability:
+
+**Metrics (numbers over time).** Request latency percentiles (p50, p95, p99), throughput (QPS), error rates, queue depths, disk usage, memory usage. Tools: Prometheus, Datadog, CloudWatch.
+
+```
+Key metrics for our four systems:
+
+Distributed SQL:  Query latency p99, Raft commit latency, range split frequency
+Key-Value Store:  GET/PUT latency p99, partition balance ratio, compaction backlog
+Transactions:     Commit rate, abort rate, transaction duration p99, lock wait time
+Query Engine:     Query duration p99, data scanned per query, worker CPU utilization
+```
+
+**Logging (structured events).** Every request should produce a structured log entry with a request ID, duration, status, and relevant context. Use structured logging (JSON format) so logs are searchable.
+
+```rust,ignore
+// Structured log entry for a database query
+tracing::info!(
+    request_id = %req_id,
+    query = %sql,
+    plan_time_ms = plan_duration.as_millis(),
+    exec_time_ms = exec_duration.as_millis(),
+    rows_returned = result.len(),
+    status = "success",
+    "query executed"
+);
+```
+
+**Tracing (request flow across services).** In a distributed system, a single client request may touch 5-10 services. Distributed tracing (OpenTelemetry, Jaeger) propagates a trace ID across service boundaries so you can visualize the entire request path and identify bottlenecks.
+
+```
+Client → Gateway → SQL Parser → Query Planner → Optimizer
+  → Executor → MVCC → Storage (Node 1)
+            → Storage (Node 2, via Raft)
+            → Storage (Node 3, via Raft)
+  ← Result aggregation ← Client
+
+Each arrow is a "span" in the trace. The trace shows:
+  Parser: 2ms, Planner: 5ms, Optimizer: 3ms
+  Executor: 150ms (includes storage + network)
+    Storage Node 1: 10ms
+    Raft replication: 30ms (includes network)
+```
+
+**Connection to toydb:** Our database has minimal observability. In production, you would add Prometheus metrics for Raft commit latency, MVCC version count, and executor row throughput. The `tracing` crate (which Tokio uses) provides structured logging. These are not feature work — they are essential infrastructure for operating the system.
+
+### Security
+
+**Authentication:** Who is making this request? In our database, we did not implement auth (single-user app). At scale, every request must carry credentials — a TLS client certificate, an API key, or a JWT token.
+
+**Authorization:** What is this user allowed to do? SQL databases use `GRANT` and `REVOKE` to control table-level and column-level access. The query planner must check permissions before executing.
+
+**Encryption at rest:** Data on disk should be encrypted. The storage engine encrypts data before writing and decrypts after reading. This is transparent to upper layers — another example of information hiding.
+
+**Encryption in transit:** All network communication (client-to-server, server-to-server Raft messages) uses TLS. Our Raft implementation sends messages in cleartext — a production system must encrypt them.
+
+### Backup and Recovery
+
+**Point-in-time recovery (PITR):** Take periodic base backups (full snapshots) and continuously stream write-ahead log (WAL) entries to durable storage (S3). To recover to time T, restore the most recent base backup before T and replay WAL entries up to T.
+
+**Connection to toydb:** Our Raft snapshots (Chapter 16) are essentially base backups, and the Raft log is the WAL. PITR combines the two concepts we already built — snapshots for bulk state and logs for incremental changes.
 
 ---
 

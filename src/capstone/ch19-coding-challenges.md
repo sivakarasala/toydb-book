@@ -187,6 +187,39 @@ The `BTreeMap::range()` method does exactly what our BST range query does — it
 - Start by asking whether the data structure is a BST, a balanced BST, or a B-tree. The algorithm is the same, but the analysis differs (balanced trees guarantee O(log n) traversal to the start).
 - Mention that `BTreeMap::range()` in Rust and `TreeMap.subMap()` in Java do this natively — interviewers want to know you recognize standard library solutions.
 - If asked about disk-based range queries, explain that B-trees store multiple keys per node to minimize disk seeks. The in-memory BST version is the same algorithm with a branching factor of 2 instead of hundreds.
+- If asked about concurrent range queries, mention that MVCC (Chapter 5) allows readers to scan without blocking writers — each reader sees a consistent snapshot of the tree.
+
+### Variation: Prefix Range Scan
+
+A common variation is scanning by key prefix rather than numeric range. This is exactly what our `Storage::scan()` method does:
+
+```rust
+fn prefix_scan(
+    node: &Option<Box<BstNode>>,
+    prefix: &str,
+    result: &mut Vec<(String, String)>,
+) where
+{
+    let Some(n) = node else { return };
+
+    // If the current key could have the prefix, check left subtree
+    if n.value.as_str() >= prefix {
+        // For a string BST, we'd use the key field
+        // This is simplified for illustration
+    }
+
+    // Check if current key starts with prefix
+    let key_str = format!("{}", n.key);
+    if key_str.starts_with(prefix) {
+        result.push((key_str, n.value.clone()));
+    }
+
+    // Continue searching right subtree if keys could still match
+    // (string ordering means prefix matches are contiguous)
+}
+```
+
+The key insight for prefix scans: in a sorted structure, all keys with the same prefix are contiguous. Once you find the first matching key, you can iterate forward until you find a non-matching key and stop. This is O(log n + k) — identical to the numeric range query.
 
 ---
 
@@ -433,6 +466,61 @@ The key insight for interviews: an expression evaluator is a tree traversal. If 
 - Mention short-circuit evaluation for `AND` and `OR` — if the left side of `AND` is false, skip the right side. Our implementation does not short-circuit (it evaluates both sides), but a production system should.
 - If asked about performance for millions of rows, mention that databases compile expressions to bytecode or machine code (JIT) instead of interpreting the tree per row. Our tree walker is correct but not fast at scale.
 
+### Variation: Stack-Based Evaluation
+
+An alternative to tree recursion is converting the expression to reverse Polish notation (RPN) and evaluating with a stack. This is how some database engines (SQLite's VDBE) implement expression evaluation:
+
+```rust,ignore
+#[derive(Debug)]
+enum RpnOp {
+    PushLiteral(Value),
+    PushColumn(usize),
+    BinaryOp(BinaryOp),
+}
+
+fn to_rpn(expr: &Expression) -> Vec<RpnOp> {
+    let mut ops = Vec::new();
+    build_rpn(expr, &mut ops);
+    ops
+}
+
+fn build_rpn(expr: &Expression, ops: &mut Vec<RpnOp>) {
+    match expr {
+        Expression::Literal(v) => ops.push(RpnOp::PushLiteral(v.clone())),
+        Expression::Column(idx) => ops.push(RpnOp::PushColumn(*idx)),
+        Expression::BinaryOp { op, left, right } => {
+            build_rpn(left, ops);
+            build_rpn(right, ops);
+            ops.push(RpnOp::BinaryOp(op.clone()));
+        }
+    }
+}
+
+fn evaluate_rpn(ops: &[RpnOp], row: &[Value]) -> Result<Value, EvalError> {
+    let mut stack: Vec<Value> = Vec::new();
+
+    for op in ops {
+        match op {
+            RpnOp::PushLiteral(v) => stack.push(v.clone()),
+            RpnOp::PushColumn(idx) => stack.push(row[*idx].clone()),
+            RpnOp::BinaryOp(op) => {
+                let right = stack.pop().unwrap();
+                let left = stack.pop().unwrap();
+                stack.push(apply_op(op, left, right)?);
+            }
+        }
+    }
+
+    Ok(stack.pop().unwrap())
+}
+```
+
+The RPN approach has two advantages for databases:
+1. **No recursion.** The stack depth is bounded by the expression depth, and the evaluation loop has no function call overhead.
+2. **Compilable.** The `Vec<RpnOp>` is essentially bytecode. You can compile it once and evaluate it millions of times (once per row) without re-traversing the tree.
+
+TiDB uses this approach: expressions are compiled to RPN bytecode before the executor starts, and the inner loop evaluates bytecode without tree traversal.
+
 ---
 
 ## Problem 3: Query Plan Builder
@@ -636,6 +724,42 @@ The bitmask DP technique is the same one used in PostgreSQL's `join_search_one_l
 - Start with the brute force permutation approach, then introduce the bitmask DP as the optimization. This shows progression.
 - If the interviewer asks about more than 12 tables, mention that production systems use heuristics: greedy (join smallest first), simulated annealing, or genetic algorithms.
 - The key insight interviewers want: "the number of possible join orders is factorial, but DP reduces it to exponential by reusing subproblem solutions."
+
+### Variation: Greedy Join Ordering
+
+In practice, most query optimizers use a greedy heuristic for join ordering when the number of tables exceeds the DP threshold (typically 10-12 tables). The greedy approach: always join the two smallest available tables next.
+
+```rust,ignore
+fn greedy_join_order(tables: &mut Vec<(&str, u64)>) -> (u64, Vec<String>) {
+    let mut total_cost = 0u64;
+    let mut order = Vec::new();
+
+    while tables.len() > 1 {
+        // Sort by size — smallest tables first
+        tables.sort_by_key(|&(_, size)| size);
+
+        // Join the two smallest
+        let (name_a, size_a) = tables.remove(0);
+        let (name_b, size_b) = tables.remove(0);
+
+        let join_cost = size_a * size_b;
+        let result_size = size_a.min(size_b) * 10;
+
+        total_cost += join_cost;
+        order.push(format!("{} JOIN {}", name_a, name_b));
+
+        // Add the result as a new "table"
+        let result_name = format!("({} JOIN {})", name_a, name_b);
+        tables.push((Box::leak(result_name.into_boxed_str()), result_size));
+    }
+
+    (total_cost, order)
+}
+```
+
+The greedy approach is O(n^2 log n) — far better than factorial or even exponential. It does not always find the optimal plan, but it finds a good plan quickly. PostgreSQL's GEQO (Genetic Query Optimizer) takes this further with genetic algorithms for 12+ table joins.
+
+For interviews, knowing both the DP optimal and the greedy heuristic shows you understand the full solution space — not just the textbook answer.
 
 ---
 
@@ -894,6 +1018,52 @@ Our topological sort approach is the heart of SSI: build the dependency graph, c
 - Know the three types of conflicts: write-read (WR), read-write (RW), write-write (WW). Read-read is not a conflict.
 - If asked how to handle cycles in a real database, explain that you abort the youngest transaction in the cycle (the one with the highest transaction ID) and retry it.
 - Mention that Kahn's algorithm (BFS-based topological sort) naturally detects cycles — if the queue empties before all nodes are processed, a cycle exists.
+
+### Variation: Parallel Execution
+
+An extension of the scheduling problem: given a valid serial order, identify which transactions can be executed in parallel. Two transactions can execute in parallel if they have no edge between them in the dependency graph.
+
+This reduces to finding the **width** of the dependency DAG — the maximum number of independent transactions at any point. The width determines the maximum parallelism:
+
+```rust,ignore
+fn parallel_groups(order: &[usize], graph: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    let n = graph.len();
+    let mut in_degree = vec![0usize; n];
+    for edges in graph {
+        for &dest in edges {
+            in_degree[dest] += 1;
+        }
+    }
+
+    let mut groups = Vec::new();
+    let mut remaining: Vec<bool> = vec![true; n];
+
+    loop {
+        // Find all nodes with in-degree 0 among remaining nodes
+        let group: Vec<usize> = (0..n)
+            .filter(|&i| remaining[i] && in_degree[i] == 0)
+            .collect();
+
+        if group.is_empty() {
+            break;
+        }
+
+        // Remove these nodes and update in-degrees
+        for &node in &group {
+            remaining[node] = false;
+            for &neighbor in &graph[node] {
+                in_degree[neighbor] -= 1;
+            }
+        }
+
+        groups.push(group);
+    }
+
+    groups
+}
+```
+
+Each group can execute in parallel. This is how some database engines schedule independent transactions — they identify non-conflicting groups and execute them concurrently on different cores.
 
 ---
 
@@ -1801,3 +1971,61 @@ The merge operation's mathematical properties — commutativity (`A merge B = B 
 Each problem connects directly to a component of the database you built. The B-tree traversal is your storage engine's scan. The expression evaluator is your query executor. The topological sort is serializability checking. The sliding window is Raft log compaction. The cycle detector is deadlock detection. The CRDT is an alternative to Raft's strong consistency model.
 
 These are not just interview problems — they are the algorithms that run inside every database you will ever use.
+
+---
+
+## Additional Practice
+
+Each problem above has natural extensions. Here are follow-up challenges you can attempt on your own:
+
+### Extensions by Problem
+
+**Problem 1 (KV Range Query):**
+- Implement a range scan that returns an iterator instead of a Vec. This mirrors the design improvement discussed in Chapter 18.5 (Design Reflection).
+- Add a `LIMIT` parameter that stops the scan after N results. How does this change the complexity?
+- Implement a reverse range scan (iterate from `end` to `start` in descending order).
+
+**Problem 2 (Expression Evaluator):**
+- Add NULL handling. SQL's three-valued logic (true, false, NULL) requires special cases: `NULL AND false = false`, `NULL AND true = NULL`, `NULL OR true = true`, `NULL OR false = NULL`.
+- Add aggregate function support: `SUM`, `COUNT`, `AVG`, `MIN`, `MAX`. These accumulate state across multiple rows.
+- Implement constant folding: if both operands of a binary operation are literals, compute the result at plan time instead of execution time.
+
+**Problem 3 (Query Plan Builder):**
+- Add join predicate selectivity: instead of using `min(A, B) * 10` for result sizes, estimate based on the join predicate (equality join on a primary key produces at most `min(A, B)` rows).
+- Implement the greedy heuristic (always join the two smallest available tables) and compare its results to the DP optimal. How often does greedy find the optimal plan?
+
+**Problem 4 (Transaction Scheduler):**
+- Extend to handle read-write conflicts at the column level instead of the row level. Two transactions that write different columns of the same row do not conflict.
+- Implement SSI (Serializable Snapshot Isolation): detect write skew anomalies by tracking read sets.
+
+**Problem 5 (Raft Log Compaction):**
+- Implement InstallSnapshot RPC: when a follower is too far behind to catch up via AppendEntries, send the entire snapshot. This requires serializing the state machine state.
+- Add a compaction trigger based on log size (in bytes) rather than entry count.
+
+**Problem 6 (Index Scan Optimizer):**
+- Add composite index support: an index on `(a, b)` can satisfy `WHERE a = 1 AND b = 2` but also `WHERE a = 1` (using just the prefix).
+- Implement an index-only scan: if the index contains all columns needed by the query, skip the table lookup entirely.
+
+**Problem 7 (Deadlock Detector):**
+- Implement the wait-die protocol: older transactions wait for younger ones; younger transactions die (abort) when they would wait for older ones. This prevents deadlocks by construction.
+- Extend to waits-for graphs with multiple lock types (shared, exclusive). Two transactions holding shared locks on the same key do not conflict.
+
+**Problem 8 (Distributed Counter):**
+- Implement a PN-Counter that supports both increment and decrement (included in the solution above). Verify that it converges correctly.
+- Implement an OR-Set (Observed-Remove Set) — a CRDT set where elements can be added and removed without conflicts.
+- Implement a LWW-Register (Last-Writer-Wins Register) using vector clocks for causal ordering.
+
+### Cross-Problem Connections
+
+Several problems share underlying structures:
+
+| Shared Pattern | Problems |
+|---------------|----------|
+| Tree traversal | 1 (BST range scan), 2 (expression tree), 3 (plan tree) |
+| Graph algorithms | 4 (topological sort), 7 (cycle detection) |
+| Sliding window / amortized | 5 (log compaction), 6 (scan optimization) |
+| Conflict resolution | 4 (transaction scheduling), 7 (deadlock detection), 8 (CRDTs) |
+
+Understanding these connections helps you recognize patterns in unfamiliar problems. When you see a problem involving "ordering things with constraints," think topological sort. When you see "detect contradictions in a dependency graph," think cycle detection. When you see "merge data from multiple sources without coordination," think CRDTs.
+
+The database domain naturally produces problems from every major algorithm category — trees, graphs, dynamic programming, greedy algorithms, and distributed data structures. This is why database internals are such fertile ground for interview preparation: they motivate real problems with real trade-offs, not artificial puzzle-box exercises.

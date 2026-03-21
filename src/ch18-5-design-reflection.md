@@ -695,6 +695,152 @@ Each layer depends only on the layer directly below it. The SQL interface does n
 
 ---
 
+## Tests as Design Feedback
+
+Ousterhout does not say much about testing, but our experience building toydb reveals a deep connection between testability and design quality. **Code that is hard to test is usually poorly designed.** The difficulty of writing a test is feedback about the module's interface.
+
+### The Storage trait made testing easy
+
+Because every storage engine implements the same `Storage` trait, we can write tests once and run them against every implementation:
+
+```rust,ignore
+fn test_storage_set_and_get<S: Storage>(storage: &mut S) {
+    storage.set("key1".into(), b"value1".to_vec()).unwrap();
+    let result = storage.get("key1").unwrap();
+    assert_eq!(result, Some(b"value1".to_vec()));
+}
+
+#[test]
+fn memory_storage_set_and_get() {
+    let mut store = MemoryStorage::new();
+    test_storage_set_and_get(&mut store);
+}
+
+#[test]
+fn log_storage_set_and_get() {
+    let dir = tempdir().unwrap();
+    let mut store = LogStorage::new(dir.path().join("test.log")).unwrap();
+    test_storage_set_and_get(&mut store);
+}
+```
+
+The trait boundary is a natural testing seam. You test the contract (does `get` return what `set` stored?) not the implementation (does the file have the right bytes at the right offset?). This is the same principle as Ousterhout's deep modules: the interface is small and stable, so tests against the interface are robust.
+
+### MVCC tests revealed a design issue
+
+When writing MVCC tests, we discovered that testing concurrent transactions was awkward. The test needed to:
+
+1. Begin transaction T1
+2. Set a value in T1
+3. Begin transaction T2
+4. Read the value in T2 (should not see T1's write — T1 has not committed)
+5. Commit T1
+6. Read the value in T2 again (still should not see T1's write — T2's snapshot is frozen)
+
+The awkwardness: steps 2-4 require interleaving operations from two transactions on the same storage. If the MVCC API required a mutable reference to the storage, you could not have two active transactions simultaneously (Rust's borrow checker would prevent it).
+
+This forced a design decision: use `Arc<RwLock<Storage>>` for shared access, or use message-passing. We chose the interior mutability approach:
+
+```rust,ignore
+struct MvccStorage {
+    inner: Arc<RwLock<Box<dyn Storage>>>,
+    next_version: Arc<AtomicU64>,
+}
+```
+
+The testing difficulty was a signal that single-threaded ownership was wrong for a concurrency layer. The test was hard to write because the API was wrong. After fixing the API, the test became straightforward:
+
+```rust,ignore
+#[test]
+fn snapshot_isolation() {
+    let store = MvccStorage::new(Box::new(MemoryStorage::new()));
+
+    let mut t1 = store.begin();
+    t1.set("key".into(), b"v1".to_vec()).unwrap();
+
+    let t2 = store.begin(); // Starts BEFORE t1 commits
+    assert_eq!(t2.get("key").unwrap(), None); // Does not see t1's write
+
+    t1.commit().unwrap();
+
+    // t2 still does not see it — snapshot is frozen
+    assert_eq!(t2.get("key").unwrap(), None);
+
+    // A NEW transaction sees the committed value
+    let t3 = store.begin();
+    assert_eq!(t3.get("key").unwrap(), Some(b"v1".to_vec()));
+}
+```
+
+The lesson: if your test is fighting the API, the API is wrong. Fix the API, not the test.
+
+### Raft testing required a simulated network
+
+Testing Raft with real TCP connections would be slow (network latency), flaky (port conflicts, firewall rules), and incomplete (how do you test network partitions?). Instead, we built a simulated network:
+
+```rust,ignore
+struct SimulatedNetwork {
+    nodes: HashMap<u64, RaftNode>,
+    messages: VecDeque<(u64, u64, Message)>, // (from, to, message)
+    partitions: HashSet<(u64, u64)>,          // blocked connections
+}
+
+impl SimulatedNetwork {
+    fn deliver_one(&mut self) {
+        if let Some((from, to, msg)) = self.messages.pop_front() {
+            if !self.partitions.contains(&(from, to)) {
+                self.nodes.get_mut(&to).unwrap().step(msg);
+            }
+            // If partitioned, the message is silently dropped
+        }
+    }
+
+    fn partition(&mut self, a: u64, b: u64) {
+        self.partitions.insert((a, b));
+        self.partitions.insert((b, a));
+    }
+
+    fn heal(&mut self, a: u64, b: u64) {
+        self.partitions.remove(&(a, b));
+        self.partitions.remove(&(b, a));
+    }
+}
+```
+
+This made tests deterministic and comprehensive:
+
+```rust,ignore
+#[test]
+fn leader_election_after_partition() {
+    let mut net = SimulatedNetwork::new(3); // 3-node cluster
+
+    // Elect a leader
+    net.tick_until_leader();
+    let leader = net.leader().unwrap();
+
+    // Partition the leader from the other two nodes
+    for &peer in &net.peers_of(leader) {
+        net.partition(leader, peer);
+    }
+
+    // The remaining two nodes should elect a new leader
+    net.tick_until_leader_among(&net.peers_of(leader));
+    let new_leader = net.leader_among(&net.peers_of(leader)).unwrap();
+    assert_ne!(new_leader, leader);
+
+    // Heal the partition — old leader should step down
+    for &peer in &net.peers_of(leader) {
+        net.heal(leader, peer);
+    }
+    net.tick(10);
+    assert_eq!(net.nodes[&leader].state(), NodeState::Follower);
+}
+```
+
+This test covers a scenario that would be nearly impossible to reproduce reliably with real networking. The simulated network is the testing equivalent of a deep module: a simple interface (`deliver_one`, `partition`, `heal`) that hides the complexity of deterministic message ordering.
+
+---
+
 ## Retrospective: What We Would Change
 
 If you were redesigning toydb from scratch, knowing everything you know now, what would you change? This is the most valuable question a software engineer can ask. Here are five changes, ordered by impact.
@@ -796,9 +942,61 @@ pub trait WriteStorage: ReadStorage {
 
 The executor's scan operators need only `ReadStorage`. The MVCC commit path needs `WriteStorage`. Raft wraps `WriteStorage` to replicate writes. The type system would enforce the read/write split — a component with only a `&dyn ReadStorage` reference cannot accidentally modify data.
 
-### 5. Batch operations for Raft
+### 5. A proper write-ahead log (WAL)
 
-Our Raft implementation proposes one command at a time. A production system batches multiple client commands into a single log entry:
+Our BitCask engine uses the data log itself as the recovery mechanism — on startup, it replays the entire log to rebuild the in-memory index. A production database separates the WAL from the data store:
+
+```rust,ignore
+// Current: the data log IS the recovery log
+// Recovery: replay entire log from beginning
+impl LogStorage {
+    fn recover(&mut self) -> Result<(), StorageError> {
+        let mut reader = BufReader::new(File::open(&self.path)?);
+        while let Some((key, value, offset)) = self.read_next_record(&mut reader)? {
+            match value {
+                Some(_) => { self.index.insert(key, offset); }
+                None => { self.index.remove(&key); } // tombstone
+            }
+        }
+        Ok(())
+    }
+}
+
+// Redesigned: separate WAL from data store
+// WAL records operations; data store holds current state
+struct WalStorage {
+    wal: File,           // append-only log of operations
+    data: BTreeMap<String, Vec<u8>>,  // current state
+    wal_offset: u64,     // last applied WAL position
+}
+
+impl WalStorage {
+    fn set(&mut self, key: String, value: Vec<u8>) -> Result<(), StorageError> {
+        // 1. Write to WAL first (durability)
+        self.wal_append(WalEntry::Set { key: key.clone(), value: value.clone() })?;
+        self.wal.sync_data()?;  // fsync — data is now durable
+
+        // 2. Apply to in-memory data store (performance)
+        self.data.insert(key, value);
+        Ok(())
+    }
+
+    fn recover(&mut self) -> Result<(), StorageError> {
+        // Replay only entries after the last checkpoint
+        let entries = self.read_wal_from(self.wal_offset)?;
+        for entry in entries {
+            self.apply(entry);
+        }
+        Ok(())
+    }
+}
+```
+
+The key advantage: the WAL is append-only and sequentially written (fast), while the data store can use any structure (B-tree, LSM tree, hash map) optimized for reads. Recovery replays only the WAL entries since the last checkpoint, not the entire history. PostgreSQL, MySQL, SQLite, and every production database uses this pattern.
+
+### 6. Batch operations for Raft
+
+Our Raft implementation proposes one command at a time. A production system batches multiple client commands into a single Raft proposal:
 
 ```rust,ignore
 // Current: one proposal per command
@@ -814,6 +1012,57 @@ raft.propose_batch(batch)?;
 ```
 
 Batching amortizes the cost of a Raft round — one disk flush and one network round-trip for N commands instead of N flushes and N round-trips. This is the single most impactful performance improvement for a replicated database.
+
+The implementation is straightforward: instead of calling `raft.propose()` immediately when a client request arrives, buffer requests for a short window (e.g., 1ms) and then propose them as a single batch:
+
+```rust,ignore
+struct BatchProposer {
+    buffer: Vec<Vec<u8>>,
+    max_batch_size: usize,
+    flush_interval: Duration,
+    last_flush: Instant,
+}
+
+impl BatchProposer {
+    fn submit(&mut self, command: Vec<u8>, raft: &mut RaftNode) -> Result<(), RaftError> {
+        self.buffer.push(command);
+
+        if self.buffer.len() >= self.max_batch_size
+            || self.last_flush.elapsed() >= self.flush_interval
+        {
+            let batch = std::mem::take(&mut self.buffer);
+            let serialized = bincode::serialize(&batch)?;
+            raft.propose(serialized)?;
+            self.last_flush = Instant::now();
+        }
+        Ok(())
+    }
+}
+```
+
+At 10,000 commands per second with a 1ms flush interval, each batch contains ~10 commands. This reduces Raft consensus rounds from 10,000 to 1,000 per second — a 10x improvement in throughput with at most 1ms of added latency.
+
+### 7. Connection pooling and concurrent clients
+
+Our client-server protocol (Chapter 12) handles one connection at a time. A production database needs connection pooling — a fixed pool of connections shared across many client requests. Without pooling, 1,000 concurrent clients create 1,000 connections, each consuming memory for buffers, transaction state, and parser state. With a pool of 50 connections, the 1,000 clients share those 50 — queueing when all are busy. This bounds memory usage and prevents connection storms from overwhelming the database.
+
+```rust,ignore
+struct ConnectionPool {
+    connections: Vec<DatabaseConnection>,
+    available: tokio::sync::Semaphore,
+}
+
+impl ConnectionPool {
+    async fn execute(&self, query: String) -> Result<ResultSet, Error> {
+        let permit = self.available.acquire().await?;
+        let conn = self.checkout();
+        let result = conn.execute(query).await;
+        self.return_connection(conn);
+        drop(permit);
+        result
+    }
+}
+```
 
 ---
 

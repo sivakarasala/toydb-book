@@ -147,6 +147,38 @@ Before you simulate any interview, prepare the way you would for a real one.
 
 ---
 
+### Question 4: "How do you handle working on a project with unclear requirements?"
+
+> **Sarah:** "Have you worked on a project where the requirements were unclear or kept changing? How did you handle it?"
+
+#### Model Answer
+
+> **You:** "Building the SQL layer was exactly this situation. When I started the storage engine, the requirements were crisp — store bytes, retrieve bytes, handle crashes. But when I moved to the SQL layer, I had to decide: which subset of SQL should I support? Full ANSI SQL? A minimal subset? Something in between?
+>
+> I handled this by starting with the simplest possible feature set and expanding based on what the later chapters needed. The first version of the parser handled only `SELECT column FROM table WHERE condition`. No joins, no aggregations, no subqueries. This was enough to test the executor end-to-end.
+>
+> Then I expanded incrementally: Chapter 11 added joins and GROUP BY because those are the most interview-relevant SQL features. Each addition was driven by a concrete need — I never added SQL syntax 'just in case.'
+>
+> The key principle was making each component extensible without making it complex. The expression evaluator handles any tree structure, so adding a new binary operator (like `BETWEEN`) means adding one match arm — not restructuring the evaluator. The planner translates AST nodes to plan nodes, so adding a new SQL clause means adding one translation case.
+>
+> The lesson: when requirements are unclear, design for extension rather than prediction. Do not guess what you will need. Build a clean foundation and extend it when the need materializes."
+
+**Commentary:** This answer demonstrates two things interviewers look for: (1) a pragmatic approach to ambiguity (start simple, iterate), and (2) design thinking that handles change gracefully (extensible components). The specific example of the expression evaluator being extensible via one match arm is a concrete illustration of the principle.
+
+---
+
+### Behavioral Interview Anti-Patterns
+
+| Anti-Pattern | Example | Better Approach |
+|-------------|---------|-----------------|
+| **The Humble Brag** | "My biggest weakness is I care too much about code quality" | Name a real weakness with a real mitigation |
+| **The Blame Game** | "The project failed because the PM gave bad requirements" | Own your part: "I should have pushed back on the timeline" |
+| **The Non-Answer** | "I handle conflict by being professional" | Give a specific example with a specific outcome |
+| **The Monologue** | Speaking for 5+ minutes without a pause | Stop every 2 minutes: "Should I go deeper on any of this?" |
+| **The Recitation** | Clearly rehearsed word-for-word | Prepare the structure and key points, not a script |
+
+---
+
 ## Mock Interview 2: System Design (45 Minutes)
 
 **Setting:** You join a video call. The interviewer introduces himself as Marcus, a staff engineer. He shares a collaborative whiteboard.
@@ -390,6 +422,28 @@ Storage totals (1 year):
 > **Raj:** "We will work through a coding problem today. I care about your problem-solving process more than perfect code. Talk me through your thinking as you go. Ready?"
 
 > **You:** "Ready."
+
+---
+
+### Warm-Up: Architecture Walkthrough (5 minutes)
+
+Before the main problem, interviewers often ask you to explain a system you have built. This is your chance to set the context.
+
+> **Raj:** "Before we get to the coding problem, I see on your resume you built a database. Can you give me a 2-minute overview of the architecture?"
+
+> **You:** "Sure. It is a distributed SQL database written in Rust with six layers. At the bottom is a key-value storage engine — I built two implementations behind a common `Storage` trait: an in-memory `BTreeMap` store and a BitCask-style log-structured store with CRC checksums.
+>
+> On top of that is an MVCC layer for snapshot isolation — each transaction reads from a frozen point-in-time view, so readers never block writers.
+>
+> The SQL layer has a hand-written lexer, a recursive descent parser, a query planner, a cost-based optimizer, and a Volcano-model executor where each operator implements `next()` and pulls rows through the pipeline.
+>
+> For replication, I implemented Raft consensus — leader election, log replication, and snapshots. Writes go through Raft; reads use local state.
+>
+> The integration layer wires it all together: a client sends a SQL string, it flows through all seven layers, and the result comes back."
+
+> **Raj:** "Interesting. The coding problem today is actually related to Raft. Let us get into it."
+
+**Commentary:** This walkthrough accomplishes two things: (1) it gives the interviewer context for following up on any layer, and (2) it naturally introduces the Raft domain, making the coding problem feel like a continuation of the conversation rather than a cold start.
 
 ---
 
@@ -759,6 +813,67 @@ mod tests {
 
 ---
 
+#### Step 7: Complexity Discussion (2 minutes)
+
+> **Raj:** "Walk me through the complexity of both solutions."
+
+> **You:** "The brute force is O(min(L, F)) — we compare entries one by one until we find a disagreement. In the worst case, the logs agree everywhere and we scan the entire overlapping region.
+>
+> The optimized binary search is O(log(min(L, F))). At each step, we halve the search space. For logs with 1 million entries, that is 20 comparisons instead of 1 million.
+>
+> Space is O(1) for both — we use only index variables, no auxiliary data structures.
+>
+> In the distributed follow-up, the binary search trades network round trips. Each comparison is one `AppendEntries` RPC. With 1 million entries, the naive approach takes up to 1 million round trips (decrementing `nextIndex` one at a time). Binary search takes 20 round trips. At 1ms round-trip time within a data center, that is 20ms versus 1,000 seconds."
+
+> **Raj:** "That quantification is exactly what I wanted to hear. You can estimate the practical impact, not just state the Big-O."
+
+**Commentary:** Quantifying the practical impact of an algorithmic improvement is a senior-level signal. Junior candidates say "binary search is O(log n)." Senior candidates say "that reduces log reconciliation from 17 minutes to 20 milliseconds for a log with 1 million entries."
+
+---
+
+#### Alternative Problem: MVCC Snapshot Visibility
+
+If the interviewer prefers a data-structure-focused problem, another common database interview question is implementing snapshot visibility for MVCC.
+
+> "Given a set of transactions with their start and commit timestamps, and a query transaction with a start timestamp, determine which writes are visible to the query transaction under snapshot isolation."
+
+The key insight: a write is visible if:
+1. The writing transaction committed before the reading transaction started
+2. The writing transaction is not the reading transaction itself (unless it is reading its own writes)
+
+```rust,ignore
+struct Write {
+    key: String,
+    value: String,
+    txn_id: u64,
+    commit_ts: Option<u64>,  // None if not yet committed
+}
+
+fn visible_writes(
+    writes: &[Write],
+    query_start_ts: u64,
+    query_txn_id: u64,
+) -> Vec<&Write> {
+    writes.iter()
+        .filter(|w| {
+            // Own writes are always visible
+            if w.txn_id == query_txn_id {
+                return true;
+            }
+            // Other writes are visible only if committed before query started
+            match w.commit_ts {
+                Some(ts) if ts < query_start_ts => true,
+                _ => false,
+            }
+        })
+        .collect()
+}
+```
+
+This directly tests understanding of MVCC (Chapter 5) and is a common follow-up to "explain how snapshot isolation works."
+
+---
+
 ### Coding Interview Tips
 
 | Phase | Time | Focus |
@@ -778,6 +893,117 @@ mod tests {
 | Test with the given example AND edge cases | Only test the happy path |
 | Mention time and space complexity | Leave complexity analysis to the end (or skip it) |
 | Connect to real systems when possible | Treat the problem as purely abstract |
+
+---
+
+## Preparing Your toydb Story
+
+The three interviews above all draw on the toydb project. Here is how to prepare your version of the story — adapted to your own experience building the database.
+
+### The Elevator Pitch (30 seconds)
+
+> "I built a distributed SQL database from scratch in Rust. It has a storage engine with two backends, MVCC for concurrency, a hand-written SQL parser and optimizer, a Volcano-model executor, and Raft consensus for replication. The whole thing is about 5,000 lines of code and passes end-to-end integration tests."
+
+Practice this until it flows naturally. You will use it to open behavioral questions and as context in system design discussions.
+
+### The Architecture Summary (2 minutes)
+
+Draw this diagram from memory:
+
+```
+SQL String
+  → Lexer (tokenize)
+    → Parser (build AST)
+      → Planner (resolve tables, build plan)
+        → Optimizer (reorder, push down filters)
+          → Executor (Volcano: next() → Row)
+            → MVCC (version, snapshot isolation)
+              → Storage (Memory or BitCask)
+                → Raft (replicate, consensus)
+```
+
+For each layer, have one sentence ready:
+- **Lexer:** "Character-by-character state machine that produces tokens."
+- **Parser:** "Recursive descent with precedence climbing for expressions."
+- **Planner:** "Translates AST to a plan tree, resolves table and column references."
+- **Optimizer:** "Cost-based rewrites — push filters below joins, eliminate redundant projections."
+- **Executor:** "Pull-based Volcano model — each operator implements `next()` returning one row."
+- **MVCC:** "Snapshot isolation using version chains encoded in storage keys."
+- **Storage:** "Two implementations behind a `Storage` trait — BTreeMap and BitCask log."
+- **Raft:** "Leader election with randomized timeouts, log replication with quorum commits."
+
+### The Three Best Decisions
+
+Prepare three decisions you can defend:
+
+1. **The Storage trait.** "I defined the interface before writing any implementation. This let me swap backends without changing other code and use in-memory storage for fast tests."
+
+2. **The Volcano executor model.** "Each operator is independent and composable. I can add new operators without modifying existing ones. Lazy evaluation means memory usage is bounded."
+
+3. **Deterministic Raft testing.** "I built a simulated network instead of using real TCP. Tests run in milliseconds and cover partition scenarios that are impossible to reliably reproduce with real networking."
+
+### The Three Honest Weaknesses
+
+Prepare three things you would change:
+
+1. **String-based key encoding.** "It was easy to debug but created coupling between MVCC and storage. Binary encoding would be more efficient and maintain cleaner boundaries."
+
+2. **No iterator-based scans.** "The scan method returns a Vec, loading all results into memory. An iterator would support tables larger than memory."
+
+3. **Single-threaded Raft.** "It processes one message at a time. Batching proposals and pipelining replication would dramatically improve throughput."
+
+### Domain-Specific Vocabulary
+
+Using the right terminology signals expertise. Here are terms from each layer with their precise meanings:
+
+| Term | Meaning | Chapter |
+|------|---------|---------|
+| Snapshot isolation | Each transaction reads from a frozen point-in-time view | 5 |
+| Write skew | Anomaly where two transactions make conflicting decisions based on overlapping reads | 5 |
+| Precedence climbing | Parser technique for handling operator precedence without explicit precedence tables | 7 |
+| Predicate push-down | Moving filter operations below joins in the plan tree to reduce intermediate result sizes | 9 |
+| Volcano model | Pull-based query execution where each operator calls `next()` on its child | 10 |
+| Hash join | Join algorithm that builds a hash table from one input, probes with the other | 11 |
+| Election timeout | Random delay before a Raft follower starts an election (prevents simultaneous elections) | 14 |
+| Log Matching Property | If two logs contain an entry with the same index and term, all preceding entries are identical | 15 |
+| Commit index | The highest log index known to be replicated on a majority of nodes | 15 |
+| Split-brain | Failure mode where two nodes both believe they are the leader | 14 |
+
+Use these terms naturally in conversation. Do not define them unless asked — using them correctly implies understanding.
+
+---
+
+## Practice Schedule
+
+### Week 1: Foundations
+
+- Day 1-2: Write your elevator pitch and architecture summary. Practice out loud.
+- Day 3-4: Solve Problems 1-4 from Chapter 19 on paper (no IDE).
+- Day 5-6: Walk through System Design 20.1 (Distributed SQL) from memory.
+- Day 7: Rest.
+
+### Week 2: Depth
+
+- Day 1-2: Solve Problems 5-8 from Chapter 19.
+- Day 3-4: Walk through System Design 20.2 (Key-Value Store) and 20.3 (Distributed Transactions).
+- Day 5-6: Practice behavioral answers: complex system, trade-off, debugging story.
+- Day 7: Mock interview with a friend (or rubber duck).
+
+### Week 3: Simulation
+
+- Day 1: Full 45-minute coding simulation (pick one Chapter 19 problem + a follow-up).
+- Day 2: Full 45-minute system design simulation (pick one Chapter 20 problem).
+- Day 3: Full 30-minute behavioral simulation.
+- Day 4-5: Review weak areas from simulations.
+- Day 6: Final run-through of all three types.
+- Day 7: Rest before the real thing.
+
+### What to Do the Night Before
+
+- Skim your toydb codebase for 20 minutes. Refresh your memory on the specific code, not the concepts.
+- Review the Chapter 19 summary table. Ensure you can name all 8 patterns and their optimal complexity.
+- Review the Chapter 20 framework: requirements → estimation → design → depth → trade-offs.
+- Sleep. Seriously. A tired brain writes worse code than a rested brain with less preparation.
 
 ---
 
@@ -816,3 +1042,52 @@ Claiming your design has no flaws. Every design has trade-offs. Naming them is a
 | Coding | Problem decomposition, correctness reasoning | DSA patterns from the database domain |
 
 The common thread: specificity. "I built a database" is forgettable. "I built a BitCask-style storage engine with CRC checksums and crash recovery, then layered MVCC on top for snapshot isolation, then connected it to Raft for replication" is memorable and credible. The database you built is your strongest interview asset — use it.
+
+---
+
+## Appendix: Question Bank
+
+Here are additional questions organized by interview type. For each one, draft a 2-minute answer that references toydb specifically.
+
+### Behavioral Questions
+
+| Question | toydb Angle |
+|----------|-------------|
+| "Tell me about a time you had to learn something quickly." | Learning Raft — reading the paper, implementing election, debugging the split-vote bug |
+| "Describe a project where requirements changed." | Adding MVCC after building the storage engine — retroactively adding concurrency |
+| "How do you handle disagreements about technical approaches?" | Memory storage vs disk storage — designing both and comparing trade-offs |
+| "Tell me about a time you simplified something complex." | The `Storage` trait — reducing four different storage concerns to four methods |
+| "What is something you are proud of technically?" | The end-to-end integration test — SQL string in, rows out, through all seven layers |
+| "How do you ensure code quality?" | Type system as the first line of defense — Rust's compiler catches bugs at compile time |
+| "Describe a time you had to debug a race condition." | MVCC concurrent transaction test — two transactions reading overlapping data |
+
+### System Design Questions
+
+| Question | toydb Concepts |
+|----------|---------------|
+| "Design a message queue (like Kafka)" | Raft log replication, append-only storage, consumer offsets |
+| "Design a cache (like Redis)" | Key-value storage, TTL, eviction policies, replication |
+| "Design a search engine (like Elasticsearch)" | Inverted indexes, tokenization, query parsing, distributed search |
+| "Design a file system (like HDFS)" | Block storage, replication, namespace management, fault tolerance |
+| "Design a configuration service (like etcd)" | Raft consensus, key-value storage, watch notifications |
+| "Design a time-series database" | Append-only writes, range queries, compaction, columnar storage |
+
+### Coding Questions
+
+| Question | Pattern | toydb Connection |
+|----------|---------|-----------------|
+| "Implement an LRU cache" | HashMap + Doubly Linked List | Buffer pool management in the storage engine |
+| "Merge K sorted lists" | Min-heap | Merge step in LSM tree compaction |
+| "Find the median in a data stream" | Two heaps | Approximate statistics for the query optimizer |
+| "Implement a trie" | Prefix tree | SQL keyword lookup in the lexer |
+| "Detect a cycle in a linked list" | Floyd's algorithm | Deadlock detection in lock-based concurrency |
+| "Serialize and deserialize a binary tree" | DFS/BFS | AST serialization for the query plan cache |
+| "Find the shortest path in a graph" | BFS/Dijkstra | Query plan cost optimization |
+
+For each coding question, practice this flow:
+1. Clarify constraints (2 minutes)
+2. State the brute force and its complexity (1 minute)
+3. Describe the optimized approach (2 minutes)
+4. Implement (10-15 minutes)
+5. Test with examples and edge cases (5 minutes)
+6. Discuss the connection to databases (1 minute)
