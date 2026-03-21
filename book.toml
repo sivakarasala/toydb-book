@@ -1,0 +1,17 @@
+[book]
+authors = ["Siva Krishna"]
+language = "en"
+src = "src"
+title = "Learn Rust by Building a Database"
+description = "A hands-on guide to Rust, DSA, and System Design — build a distributed SQL database from scratch"
+
+[build]
+build-dir = "book"
+create-missing = true
+
+[output.html]
+default-theme = "coal"
+preferred-dark-theme = "coal"
+git-repository-url = "https://github.com/sivakarasala/toydb-book"
+edit-url-template = "https://github.com/sivakarasala/toydb-book/edit/main/src/{path}"
+site-url = "/"
