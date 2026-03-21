@@ -39,8 +39,9 @@ mdbook serve --open
 - `src/capstone/` — Coding challenges, system design, mock interviews (shared)
 - `src/evolution/` — Living changelog
 - `code/ch00/` — Part 0 standalone Rust exercises
-- `code/ch01/` through `code/ch18/` — Compilable project snapshots per chapter
-- `code/capstone/` — 8 DSA exercises
+- `code/ch01/` through `code/ch18/` — Exercise + solution crates per chapter
+- `code/capstone/` — 8 DSA coding challenges with exercise + solution pairs
+- See [`code/README.md`](code/README.md) for how to work through the exercises
 
 ## Reference
 
