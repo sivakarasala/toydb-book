@@ -338,6 +338,57 @@ Only the right subtree needs synchronization.
 | LWW conflict resolution | Timestamp-based | Vector clocks | Simpler; acceptable for most use cases |
 | Virtual nodes | 200 per physical node | Static assignment | Even distribution, easy rebalancing |
 
+**4. Storage Engine: LSM Trees**
+
+A key-value store at this scale typically uses an LSM (Log-Structured Merge) tree rather than a B-tree. The reason: write amplification. A B-tree updates pages in place, which requires random I/O. An LSM tree batches writes in memory (a memtable), flushes them to sorted files on disk (SSTables), and periodically merges files in the background (compaction).
+
+```
+Write path:
+  1. Write to in-memory memtable (sorted)       ← O(log n)
+  2. When memtable is full, flush to SSTable     ← sequential I/O
+  3. Background compaction merges SSTables       ← sequential I/O
+
+Read path:
+  1. Check memtable                              ← O(log n)
+  2. Check bloom filters for each SSTable level  ← O(1) per level
+  3. Binary search in matching SSTable           ← O(log n)
+```
+
+The bloom filter is critical for read performance. Without it, every read would have to check every SSTable. A bloom filter for each SSTable answers "is this key definitely NOT in this file?" with zero disk I/O. False positives are possible (1-2%), but false negatives are not — if the bloom filter says no, the key is definitely absent.
+
+```
+Bloom filter check for GET("user:42"):
+  Level 0 SSTable: bloom filter says NO  → skip (no disk read)
+  Level 1 SSTable: bloom filter says YES → check (one disk read)
+  Found in Level 1 SSTable → return value
+```
+
+**Connection to toydb:** Our BitCask engine (Chapter 3) is a simplified LSM — it uses an append-only log (like the memtable flush) but no compaction or levels. Adding sorted runs and background compaction would turn our BitCask into a basic LSM tree. The concepts are continuous, not discrete.
+
+**5. TTL and Expiration**
+
+Time-to-live (TTL) support allows keys to expire automatically. Two implementation approaches:
+
+**Lazy expiration:** On every `get()`, check if the key has expired. If so, return `None` and mark it for deletion. This adds one timestamp comparison per read but requires no background work.
+
+**Active expiration:** A background process scans for expired keys and deletes them. This keeps the keyspace clean but consumes CPU and I/O.
+
+DynamoDB uses lazy expiration for the TTL check (reads never return expired items) plus a background process that cleans up expired items within 48 hours. This hybrid ensures consistent read behavior while amortizing cleanup cost.
+
+```rust,ignore
+fn get_with_ttl(&self, key: &str) -> Option<Value> {
+    let entry = self.storage.get(key)?;
+    if let Some(expires_at) = entry.ttl {
+        if Instant::now() > expires_at {
+            // Key has expired — return None, schedule cleanup
+            self.schedule_delete(key);
+            return None;
+        }
+    }
+    Some(entry.value)
+}
+```
+
 ### What We Learned Building toydb That Applies Here
 
 1. **The Storage trait abstracts the engine.** Whether LSM tree, B-tree, or in-memory hash map, the storage engine interface is the same: `get(key)`, `put(key, value)`, `delete(key)`. Our `Storage` trait designed in Chapter 2 is this exact interface.
@@ -345,6 +396,8 @@ Only the right subtree needs synchronization.
 2. **Quorums generalize Raft majorities.** Raft requires a majority (N/2 + 1) for both reads and writes. Leaderless quorum systems separate read and write quorums, offering more flexibility. The underlying math — overlapping quorums guarantee consistency — is the same.
 
 3. **Serialization matters at scale.** Our binary serialization (Chapter 4) directly applies. At 1M QPS, every byte of overhead in the serialization format costs megabytes per second of bandwidth. Efficient encoding (Protocol Buffers, FlatBuffers) is not premature optimization — it is table stakes.
+
+4. **Tombstones from BitCask apply everywhere.** Our `LogStorage` used tombstone records for deletes. DynamoDB, Cassandra, and every LSM-based system uses the same concept — a delete marker that is cleaned up during compaction. The pattern you learned in Chapter 3 scales to petabytes.
 
 ---
 
@@ -533,6 +586,95 @@ Spanner goes further with **stale reads**: a client can request a read at a time
 | Serializable isolation | SSI (Serializable Snapshot Isolation) | S2PL (Strict Two-Phase Locking) | Better read performance, fewer lock contentions |
 | Centralized oracle | Single service | Distributed oracles | Simpler correctness argument; batch to reduce bottleneck |
 
+**4. Serializable Snapshot Isolation (SSI)**
+
+Our MVCC implementation (Chapter 5) provides snapshot isolation — each transaction reads from a consistent snapshot. But snapshot isolation allows **write skew anomalies**: two transactions read overlapping data, make non-conflicting writes based on what they read, and produce an outcome that no serial execution would allow.
+
+Example of write skew:
+
+```
+Table: doctors_on_call
+| doctor | on_call |
+|--------|---------|
+| Alice  | true    |
+| Bob    | true    |
+
+Invariant: At least one doctor must be on call.
+
+T1: reads both rows, sees Alice=true, Bob=true.
+    Decides it is safe to set Alice=false (Bob is still on call).
+
+T2: reads both rows, sees Alice=true, Bob=true.
+    Decides it is safe to set Bob=false (Alice is still on call).
+
+After both commit: Alice=false, Bob=false. No one is on call!
+```
+
+Under serializable isolation, one transaction would see the other's write and abort. SSI achieves this by tracking read-write dependencies:
+
+1. During execution, track which keys each transaction reads (the **read set**).
+2. During commit, check if any key in the read set was written by a transaction that committed after the current transaction began.
+3. If so, the current transaction might have read stale data — abort and retry.
+
+```rust,ignore
+fn commit_ssi(&mut self, txn: &Transaction) -> Result<(), TransactionError> {
+    // Check for write skew: did any concurrent transaction write
+    // a key that we read?
+    for read_key in &txn.read_set {
+        let latest_version = self.storage.latest_version(read_key)?;
+        if latest_version > txn.start_version && latest_version <= self.current_version {
+            // Someone wrote this key after we read it — possible write skew
+            return Err(TransactionError::SerializationFailure);
+        }
+    }
+
+    // No conflicts — safe to commit
+    self.apply_writes(txn)?;
+    Ok(())
+}
+```
+
+This is how PostgreSQL implements its `SERIALIZABLE` isolation level. CockroachDB uses a similar approach but distributed: the write-skew check happens at commit time across all participating ranges.
+
+**Connection to toydb:** Our MVCC (Chapter 5) tracks write sets for conflict detection. SSI adds read set tracking — a natural extension. The topological sort from Chapter 19 (Problem 4) is the formal algorithm for checking whether a set of transactions is serializable. SSI is the practical implementation of that algorithm, optimized for the common case where conflicts are rare.
+
+**5. Parallel Commit Optimization**
+
+Standard 2PC requires two rounds of consensus — one for PREPARE and one for COMMIT. At continental latency (100ms), this means 200ms minimum commit time. CockroachDB's **parallel commit** optimization reduces this to one round.
+
+The key insight: instead of waiting for all participants to confirm PREPARE before writing the COMMIT record, the coordinator writes the COMMIT record to its own Raft group *simultaneously* with sending PREPARE messages:
+
+```
+Standard 2PC:
+  Round 1: Coordinator → Participants: PREPARE
+           Participants → Coordinator: PREPARED
+  Round 2: Coordinator → Participants: COMMIT    (+ Coordinator writes to own log)
+           Participants → Coordinator: COMMITTED
+  Total: 2 round trips = ~200ms
+
+Parallel Commit:
+  Round 1: Coordinator writes STAGING to own log
+           SIMULTANEOUSLY
+           Coordinator → Participants: PREPARE
+           Participants → Coordinator: PREPARED
+  Coordinator writes COMMITTED to own log (local, fast)
+  Round 1.5: Coordinator → Participants: COMMIT (async, not on critical path)
+  Total: 1 round trip = ~100ms
+```
+
+The STAGING record means: "this transaction will commit IF all participants confirm PREPARED." When the coordinator receives all PREPARED responses, it atomically transitions the STAGING record to COMMITTED. If the coordinator crashes during STAGING, a recovery process queries participants and either commits or aborts.
+
+This cuts commit latency in half — the single most impactful performance optimization for a distributed transaction system.
+
+### Scaling Discussion
+
+| Scale | Architecture Change |
+|-------|-------------------|
+| **Single DC** | Single timestamp oracle, Raft-based 2PC, read replicas. Essentially toydb with Multi-Raft. |
+| **2 DCs** | Raft groups span both DCs. Cross-DC latency dominates commit time (~50ms). |
+| **5 DCs** | TrueTime or HLC for timestamp ordering. Leader placement optimization (place leaders near the workload). Follower reads for geographic locality. |
+| **Global (10+ DCs)** | Partitioned timestamp oracles. Read-only transactions use stale reads. Write transactions route to the closest leader. |
+
 ### What We Learned Building toydb That Applies Here
 
 1. **MVCC is the concurrency foundation.** Our snapshot isolation from Chapter 5 provides the read-side concurrency. Distributed transactions add write-side coordination but do not replace MVCC — they build on top of it.
@@ -540,6 +682,8 @@ Spanner goes further with **stale reads**: a client can request a read at a time
 2. **Raft makes 2PC durable.** The classic criticism of 2PC — "what if the coordinator crashes?" — is solved by making the coordinator a Raft group. Every Raft group we built in Chapters 14-16 can serve as a durable 2PC coordinator.
 
 3. **The commit path determines latency.** In our single-node database, commit latency was one disk flush. In a distributed system, commit latency is one Raft round-trip (for the prepare) plus one Raft round-trip (for the commit), multiplied by the cross-DC latency. Understanding the commit path — the critical path from client request to durable commit — is the key to designing low-latency distributed transactions.
+
+4. **Read-only transactions are a special case worth optimizing.** In our database, every transaction goes through MVCC. At scale, the 80/20 read/write split means that optimizing read-only transactions (no locks, no 2PC, snapshot reads from any replica) has disproportionate impact.
 
 ---
 
@@ -741,6 +885,67 @@ The trade-off maps to the strategic vs tactical split from the design reflection
 | No checkpointing (Presto model) | Re-execute on failure | Spark-style checkpoints | Lower latency for the common case (no failure) |
 | Connector-based | Plugin architecture | Monolithic data access | Extensible to new data sources without engine changes |
 
+**5. Adaptive Query Execution**
+
+Static optimization makes all decisions before execution begins. But estimates are often wrong — a table predicted to have 1,000 rows might have 1,000,000. Adaptive query execution monitors runtime statistics and adjusts the plan during execution.
+
+```
+Static plan:
+  Hash Join (estimated: inner table has 1,000 rows, fits in memory)
+    → Scan(orders)
+    → Scan(products)
+
+Runtime reality:
+  Inner table has 10,000,000 rows — does NOT fit in memory
+  Hash join spills to disk — 100x slower than expected
+
+Adaptive plan:
+  After scanning 10,000 rows of the inner table:
+    "Actual cardinality is 100x the estimate"
+    Switch from hash join to sort-merge join (handles large tables gracefully)
+```
+
+Spark 3.0's Adaptive Query Execution (AQE) does exactly this:
+
+1. Execute the first stage of the plan
+2. Collect runtime statistics (actual row counts, data sizes)
+3. Re-optimize remaining stages using actual statistics
+4. Execute the re-optimized plan
+
+**Connection to toydb:** Our optimizer (Chapter 9) makes static decisions. Adaptive optimization is the natural extension — use the optimizer's cost model during execution, not just during planning. The cost model is the same; the input switches from estimated statistics to actual runtime measurements.
+
+**6. Query Result Caching**
+
+For repeated queries (dashboards, reports), caching the result set avoids re-executing expensive computations:
+
+```
+First execution of "SELECT region, SUM(revenue) FROM sales GROUP BY region":
+  Scan 500 GB of Parquet files in S3
+  Aggregate across 50 workers
+  Return 50 rows
+  Cache result with a hash of (query + table versions)
+
+Second execution:
+  Check cache: hash matches → return cached result
+  No data scanned, no computation
+```
+
+Cache invalidation is the hard part. Two approaches:
+
+- **TTL-based:** Cache expires after a fixed duration (e.g., 1 hour). Simple but stale.
+- **Version-based:** Track the version of each table. Invalidate cache entries when any referenced table changes. Precise but requires version tracking infrastructure.
+
+Presto uses TTL-based caching for metadata (table schemas, partition lists) and version-based caching for query results. Our database's MVCC version numbers (Chapter 5) could serve as table version identifiers — if the latest committed version for a table has not changed since the query was cached, the cached result is still valid.
+
+### Scaling Discussion
+
+| Scale | Architecture Change |
+|-------|-------------------|
+| **10 workers, 10 GB/query** | Single coordinator, all-in-memory processing. Hash exchanges. |
+| **50 workers, 100 GB/query** | Disk-based shuffle for large joins. Resource management (fair scheduling across queries). |
+| **200 workers, 1 TB/query** | Hierarchical execution (sub-coordinators). Approximate query processing for interactive speed. Adaptive query execution for large queries. |
+| **1000+ workers** | Disaggregated compute and storage. Elastic scaling (spin up workers per query). Cost-based scheduling. Result caching for repeated queries. |
+
 ### What We Learned Building toydb That Applies Here
 
 1. **The Volcano model is the foundation.** Every distributed query engine started with the Volcano model and optimized from there. Understanding pull-based execution (Chapter 10) is prerequisite to understanding push-based and vectorized alternatives.
@@ -750,6 +955,64 @@ The trade-off maps to the strategic vs tactical split from the design reflection
 3. **Expression evaluation is the inner loop.** The expression evaluator from Chapter 10 (and Problem 2 in Chapter 19) runs for every row. At analytical scale (billions of rows), this is the hottest code path. Vectorized evaluation — processing columns of values instead of row-by-row — is the key to making it fast.
 
 4. **The parser and planner are reusable.** Our SQL parser (Chapters 6-7) and planner (Chapter 8) work unchanged in a distributed engine. The distribution logic lives in the optimizer (choosing exchange operators) and the executor (parallel execution), not in parsing or planning.
+
+---
+
+## System Design Framework Recap
+
+Every system design question follows the same structure. Here is the framework distilled from the four designs above:
+
+### Step 1: Requirements (5 minutes)
+
+Ask about:
+- **Functional requirements.** What operations must the system support?
+- **Non-functional requirements.** Consistency, availability, latency, throughput.
+- **Scale.** How much data? How many users? What is the growth rate?
+- **Constraints.** Budget, team size, existing infrastructure, compatibility.
+
+### Step 2: Capacity Estimation (3 minutes)
+
+Calculate:
+- **Storage.** Total data size, growth rate, replication factor.
+- **Throughput.** Requests per second (read vs write ratio).
+- **Bandwidth.** Data transferred per request times QPS.
+- **Memory.** Cache size, working set, buffer pools.
+
+Use powers of 10 for quick estimation. Do not aim for precision — the goal is to identify which resource is the bottleneck.
+
+### Step 3: High-Level Design (10 minutes)
+
+Draw:
+- **Client → Load Balancer → Application → Storage** for simple systems.
+- **Client → Gateway → Services → Data Stores** for microservices.
+- Identify the 2-3 most important components and their interactions.
+- Label data flow arrows with operations (reads, writes, events).
+
+### Step 4: Deep Dives (15 minutes)
+
+Pick 2-3 components and go deep:
+- **Data model.** What tables/collections? How are they indexed?
+- **API design.** What endpoints? What parameters?
+- **Critical path.** What is the latency-critical sequence of operations?
+- **Failure handling.** What happens when this component fails?
+
+### Step 5: Trade-offs and Scaling (10 minutes)
+
+For every decision:
+- Name what you chose and what you did not.
+- Explain *why* with a specific reason (not "it is better").
+- Describe what changes at 10x and 100x scale.
+
+### Common Mistakes
+
+| Mistake | Why It Hurts | Better Approach |
+|---------|-------------|-----------------|
+| Jumping to architecture | You might solve the wrong problem | Spend 5 minutes on requirements first |
+| Not estimating capacity | Your design might not handle the load | Back-of-envelope math justifies decisions |
+| Only one design option | Interviewer cannot assess trade-off thinking | Always mention at least one alternative |
+| Over-engineering | Microservices for 100 users is a red flag | Start simple, scale when numbers demand it |
+| No monitoring discussion | Shows lack of production experience | Always mention metrics and alerting |
+| Ignoring failure modes | Every distributed system will fail | Discuss what happens when each component goes down |
 
 ---
 

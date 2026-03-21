@@ -817,6 +817,190 @@ Batching amortizes the cost of a Raft round — one disk flush and one network r
 
 ---
 
+## Comments Should Describe Things That Are Not Obvious
+
+Ousterhout has strong opinions about comments: they should describe *why*, not *what*. A comment that restates the code is worse than no comment — it adds visual noise and creates a second thing to maintain. A comment that explains intent, invariants, or non-obvious behavior is invaluable.
+
+### Good comments in our codebase
+
+The best comments in toydb explain invariants — things the code depends on but does not enforce:
+
+```rust,ignore
+/// Append a record to the log file.
+///
+/// Records are written as: [key_len: u32][value_len: u32][key][value][crc32: u32]
+/// A tombstone record has value_len == u32::MAX and no value bytes.
+///
+/// INVARIANT: The writer's position after this call equals the start offset
+/// of the next record. This is critical for the index — we store the offset
+/// of each record so that get() can seek directly to it.
+fn append_record(&mut self, key: &str, value: Option<&[u8]>) -> Result<u64, StorageError> {
+    // ...
+}
+```
+
+Without this comment, a reader must reverse-engineer the record format from the write code and understand *why* the offset tracking matters. The comment saves 15 minutes of reading.
+
+```rust,ignore
+/// Returns the entries that are safe to apply to the state machine.
+///
+/// An entry is safe to apply if:
+/// 1. Its index <= commit_index (the leader has confirmed a majority of replicas have it)
+/// 2. Its index > last_applied (we have not already applied it)
+///
+/// WHY NOT just apply everything up to commit_index?
+/// Because after a restart, we replay the log from the beginning. Entries that were
+/// applied before the crash have already affected the state machine. Applying them
+/// again would be incorrect (e.g., incrementing a counter twice). The last_applied
+/// marker prevents this.
+fn entries_to_apply(&self) -> Vec<LogEntry> {
+    // ...
+}
+```
+
+This comment explains a subtle correctness property that is not obvious from the code. A developer modifying the recovery logic needs to understand *why* `last_applied` exists — the code only shows *that* it is checked.
+
+### Bad comments we should remove
+
+```rust,ignore
+// Create a new HashMap
+let mut index = HashMap::new();
+
+// Loop through all entries
+for entry in entries {
+    // Insert the entry
+    index.insert(entry.key.clone(), entry.offset);
+}
+```
+
+These comments restate the code. They add nothing. Worse, if someone changes the data structure from `HashMap` to `BTreeMap`, the comment becomes actively misleading unless someone remembers to update it.
+
+### Comments as design documentation
+
+The most valuable comments in our codebase are module-level documentation that describes the design rationale:
+
+```rust,ignore
+//! # MVCC — Multi-Version Concurrency Control
+//!
+//! This module provides snapshot isolation for concurrent transactions.
+//! Instead of locking rows, it maintains multiple versions of each value.
+//! Readers see a consistent snapshot; writers create new versions.
+//!
+//! ## Key design decisions:
+//!
+//! 1. **Versions are encoded in storage keys.** A value at key "users/1"
+//!    with version 3 is stored as "users/1\0\0\0\0\0\0\0\x03". This means
+//!    version ordering is handled by the storage engine's key ordering.
+//!    Trade-off: the MVCC layer knows the key encoding scheme.
+//!
+//! 2. **Active transactions are tracked in storage.** The set of active
+//!    transaction IDs is stored under the "_txn/" key prefix. This means
+//!    snapshot visibility checks require storage reads. Trade-off: slower
+//!    reads, but the active set survives crashes.
+//!
+//! 3. **No garbage collection yet.** Old versions accumulate forever.
+//!    A production system would need a background GC process that removes
+//!    versions no longer visible to any active transaction.
+```
+
+This is Ousterhout's ideal: the comment describes the design space, the decisions made, and the trade-offs accepted. A new developer reading this module starts with a mental model of the system, not just a pile of code.
+
+---
+
+## Consistency and Naming
+
+Ousterhout dedicates a full chapter to naming because names are the most common form of documentation. A good name tells you what something does without reading the implementation. A bad name forces you to read the implementation to understand the name.
+
+### Good naming in toydb
+
+Our codebase generally follows Rust conventions, which are themselves designed for clarity:
+
+```rust,ignore
+// Types are PascalCase — clear and consistent
+struct MemoryStorage { ... }
+struct LogStorage { ... }
+struct MvccTransaction { ... }
+
+// Methods describe what they do
+fn set(&mut self, key: String, value: Vec<u8>) -> Result<(), StorageError>;
+fn begin(&mut self) -> MvccTransaction;
+fn propose(&mut self, command: Vec<u8>) -> Result<(), RaftError>;
+
+// Enum variants describe what they are
+enum NodeState { Follower, Candidate, Leader }
+enum Token { Select, From, Where, Integer(i64), Ident(String) }
+```
+
+The `Storage` trait's method names — `set`, `get`, `delete`, `scan` — are deliberately simple. They are the same names every key-value store uses. A developer who has used Redis, DynamoDB, or LevelDB immediately knows what they do.
+
+### Naming mistakes to learn from
+
+```rust,ignore
+// Too generic — what does "process" mean?
+fn process(&mut self, input: &str) -> Result<Output, Error>;
+// Better: fn execute_query(&mut self, sql: &str) -> Result<ResultSet, QueryError>;
+
+// Abbreviated — save 5 characters, cost 5 minutes of confusion
+fn mk_plan(ast: &Stmt) -> Pln;
+// Better: fn build_plan(ast: &Statement) -> Plan;
+
+// Boolean names that require mental negation
+fn is_not_committed(&self) -> bool;
+// Better: fn is_active(&self) -> bool;
+// Or: fn is_committed(&self) -> bool; (caller negates if needed)
+```
+
+Ousterhout's rule: if you need a comment to explain what a name means, the name is wrong. The comment should be unnecessary because the name itself communicates the intent.
+
+### Consistency across the codebase
+
+The most important naming rule is consistency. If the storage layer calls its main method `set`, the MVCC layer should not call the same operation `put`, and the Raft layer should not call it `write`. Inconsistent naming forces readers to build a mental mapping table: "wait, does `put` do the same thing as `set`? Or is it different?"
+
+In our codebase, the naming is mostly consistent:
+- Storage operations: `set`, `get`, `delete`, `scan`
+- Transaction operations: `begin`, `commit`, `abort` (not `rollback`)
+- Raft operations: `propose`, `step`, `tick`
+- Executor operations: `next` (the Volcano interface)
+
+Each layer has its own vocabulary, and the vocabulary is consistent within the layer. This is exactly what Ousterhout recommends.
+
+---
+
+## Complexity Budget
+
+A useful mental model: every project has a fixed **complexity budget**. Each design decision spends some of that budget. Strategic decisions spend complexity where it matters (deep modules, clean abstractions). Tactical decisions waste complexity on shortcuts that create long-term maintenance costs.
+
+### Where we spent our budget wisely
+
+| Investment | Complexity Cost | Value Returned |
+|-----------|----------------|----------------|
+| `Storage` trait abstraction | Low (4 methods, 1 trait) | High (swappable engines, testability) |
+| MVCC snapshot isolation | High (version chains, active sets) | High (concurrent reads without locks) |
+| Volcano executor model | Medium (per-operator state) | High (composable, lazy, memory-efficient) |
+| Raft state machine | High (election, replication) | High (fault tolerance, durability) |
+| CRC32 checksums | Low (one function call per record) | Medium (data integrity verification) |
+
+### Where we overspent
+
+| Decision | Complexity Cost | Value Returned |
+|---------|----------------|----------------|
+| String-based key encoding | Medium (format strings, parsing, validation) | Low (readable but fragile) |
+| Separate error type per layer | Medium (5 error enums, 10+ From impls) | Medium (clear attribution but verbose) |
+| Hand-written parser | High (400+ lines) | Medium (educational but a parser combinator would work) |
+
+### Where we underspent
+
+| Area | Complexity Saved | Risk Accepted |
+|------|-----------------|---------------|
+| No garbage collection for MVCC | Significant | Old versions accumulate forever |
+| No log compaction in Raft | Significant | Unbounded log growth |
+| No connection pooling | Low | Cannot handle concurrent clients |
+| No write-ahead log | Moderate | Recovery replays entire BitCask log |
+
+The underspent areas are explicit trade-offs for a learning project. In a production system, each one would be prioritized based on the specific workload and failure requirements.
+
+---
+
 ## The Meta-Lesson
 
 Ousterhout's principles are not rules — they are lenses. Each one reveals something different about the same codebase:
