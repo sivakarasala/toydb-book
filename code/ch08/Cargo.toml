@@ -1,0 +1,12 @@
+[package]
+name = "ch08-query-planner"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "exercise"
+path = "src/main.rs"
+
+[[bin]]
+name = "solution"
+path = "src/bin/solution.rs"

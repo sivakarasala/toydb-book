@@ -1,0 +1,12 @@
+[package]
+name = "ch11-sql-features"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "exercise"
+path = "src/main.rs"
+
+[[bin]]
+name = "solution"
+path = "src/bin/solution.rs"
