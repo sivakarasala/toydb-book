@@ -2,3 +2,69 @@
 name = "capstone"
 version = "0.1.0"
 edition = "2021"
+
+[dependencies]
+
+# Challenge 1: KV Range Query (B-Tree traversal)
+[[bin]]
+name = "c1-exercise"
+path = "src/bin/c1_kv_range_query.rs"
+[[bin]]
+name = "c1-solution"
+path = "src/bin/c1_kv_range_query_solution.rs"
+
+# Challenge 2: SQL Expression Evaluator
+[[bin]]
+name = "c2-exercise"
+path = "src/bin/c2_sql_expression_eval.rs"
+[[bin]]
+name = "c2-solution"
+path = "src/bin/c2_sql_expression_eval_solution.rs"
+
+# Challenge 3: Query Plan Builder
+[[bin]]
+name = "c3-exercise"
+path = "src/bin/c3_query_plan_builder.rs"
+[[bin]]
+name = "c3-solution"
+path = "src/bin/c3_query_plan_builder_solution.rs"
+
+# Challenge 4: Transaction Scheduler (Topological Sort)
+[[bin]]
+name = "c4-exercise"
+path = "src/bin/c4_transaction_scheduler.rs"
+[[bin]]
+name = "c4-solution"
+path = "src/bin/c4_transaction_scheduler_solution.rs"
+
+# Challenge 5: Raft Log Compaction (Sliding Window)
+[[bin]]
+name = "c5-exercise"
+path = "src/bin/c5_raft_log_compaction.rs"
+[[bin]]
+name = "c5-solution"
+path = "src/bin/c5_raft_log_compaction_solution.rs"
+
+# Challenge 6: Index Scan Optimizer
+[[bin]]
+name = "c6-exercise"
+path = "src/bin/c6_index_scan_optimizer.rs"
+[[bin]]
+name = "c6-solution"
+path = "src/bin/c6_index_scan_optimizer_solution.rs"
+
+# Challenge 7: Deadlock Detector (Cycle Detection)
+[[bin]]
+name = "c7-exercise"
+path = "src/bin/c7_deadlock_detector.rs"
+[[bin]]
+name = "c7-solution"
+path = "src/bin/c7_deadlock_detector_solution.rs"
+
+# Challenge 8: Distributed Counter (CRDTs)
+[[bin]]
+name = "c8-exercise"
+path = "src/bin/c8_distributed_counter.rs"
+[[bin]]
+name = "c8-solution"
+path = "src/bin/c8_distributed_counter_solution.rs"

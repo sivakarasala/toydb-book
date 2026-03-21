@@ -1,0 +1,14 @@
+[package]
+name = "ch18-testing"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[[bin]]
+name = "exercise"
+path = "src/main.rs"
+
+[[bin]]
+name = "solution"
+path = "src/bin/solution.rs"

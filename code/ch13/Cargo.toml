@@ -1,0 +1,15 @@
+[package]
+name = "ch13-async-networking"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[[bin]]
+name = "exercise"
+path = "src/main.rs"
+
+[[bin]]
+name = "solution"
+path = "src/bin/solution.rs"

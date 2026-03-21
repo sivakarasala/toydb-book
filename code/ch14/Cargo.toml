@@ -1,0 +1,15 @@
+[package]
+name = "ch14-raft-election"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.8"
+
+[[bin]]
+name = "exercise"
+path = "src/main.rs"
+
+[[bin]]
+name = "solution"
+path = "src/bin/solution.rs"

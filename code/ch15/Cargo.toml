@@ -1,0 +1,12 @@
+[package]
+name = "ch15-raft-log"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "exercise"
+path = "src/main.rs"
+
+[[bin]]
+name = "solution"
+path = "src/bin/solution.rs"
