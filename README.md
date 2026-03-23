@@ -170,6 +170,25 @@ git fetch origin main
 git merge origin/main
 ```
 
+## 12-Week Study Plan
+
+| Week | Chapters | Focus | Goal |
+|:----:|:---------|:------|:-----|
+| 1 | Ch 1-2 | KV store + storage trait | `HashMap` engine, `trait Engine` |
+| 2 | Ch 3-4 | BitCask + serialization | Persistent storage, `serde`/`bincode` |
+| 3 | Ch 5 | MVCC transactions | Multi-version concurrency control |
+| 4 | Ch 6-7 | SQL lexer + parser | Tokenizer, recursive descent, AST |
+| 5 | Ch 8-9 | Query planner + optimizer | Plan tree, cost-based rewrites |
+| 6 | Ch 10-11 | Executor + joins | Volcano model — your DB runs SQL! |
+| 7 | Ch 12-13 | Client-server + async | TCP protocol, `tokio` |
+| 8 | Ch 14 | Raft leader election | State machines, term voting |
+| 9 | Ch 15-16 | Raft log + WAL | Replication, write-ahead log |
+| 10 | Ch 17-18 | Integration + testing | Full database, benchmarks |
+| 11 | C1-C4 | Capstone challenges | KV range, SQL eval, planner, scheduler |
+| 12 | C5-C8 | Capstone + review | Raft compaction, optimizer, deadlock, CRDT |
+
+**Pace:** ~2 hours/day, 5-6 days/week. The tracker shows your current week after each commit.
+
 ## Two Learning Tracks
 
 | Track | For | Starts At |

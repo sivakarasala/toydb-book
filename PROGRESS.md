@@ -9,8 +9,9 @@
 | **Started** | 2026-03-23 |
 | **Target** | 2026-06-15 (12 weeks) |
 | **Day** | 0 of 84 |
-| **Week** | 0 of 12 |
+| **Week** | 1 of 12 |
 | **Remaining** | 84 days |
+| **This week** | W1: Ch 1-2 — KV store + storage trait |
 
 ```
 Time:     ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  0%
@@ -18,6 +19,23 @@ Progress: █████████████████████░░�
 ```
 
 **Pace: ✅ On track**
+
+## 12-Week Study Plan
+
+| Week | Chapters | Focus |
+|:----:|:---------|:------|
+| 👉 1 | Ch 1-2 | KV store + storage trait |
+|  2 | Ch 3-4 | BitCask + serialization |
+|  3 | Ch 5 | MVCC transactions |
+|  4 | Ch 6-7 | SQL lexer + parser |
+|  5 | Ch 8-9 | Query planner + optimizer |
+|  6 | Ch 10-11 | Executor + joins |
+|  7 | Ch 12-13 | Client-server + async |
+|  8 | Ch 14 | Raft leader election |
+|  9 | Ch 15-16 | Raft log + WAL |
+|  10 | Ch 17-18 | Integration + testing |
+|  11 | C1-C4 | Capstone challenges |
+|  12 | C5-C8 | Capstone + review |
 
 ## Overall
 
