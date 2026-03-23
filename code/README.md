@@ -110,6 +110,54 @@ cargo test --bin c1-exercise
 cargo test --bin c1-solution
 ```
 
+## The Full Database: `code/toydb/`
+
+After completing all chapters, everything comes together in a single integrated crate:
+
+```
+code/toydb/
+├── src/
+│   ├── main.rs           ← SQL REPL (interactive shell)
+│   ├── lib.rs            ← Database engine (wires all layers)
+│   ├── error.rs          ← Error types
+│   ├── storage/
+│   │   ├── mod.rs        ← Storage trait (Ch2)
+│   │   └── memory.rs     ← In-memory engine (Ch1-2)
+│   ├── sql/
+│   │   ├── types.rs      ← Type system (Value, DataType, Schema)
+│   │   ├── lexer.rs      ← Tokenizer (Ch6)
+│   │   ├── parser.rs     ← AST builder (Ch7)
+│   │   ├── planner.rs    ← Query planner (Ch8-9)
+│   │   └── executor.rs   ← Query executor (Ch10-11)
+│   └── raft/
+│       ├── mod.rs        ← Raft log + recovery (Ch14-16)
+│       └── wal.rs        ← Write-ahead log (Ch16)
+```
+
+Run it:
+
+```bash
+cd code/toydb
+
+# In-memory mode
+cargo run
+
+# With WAL persistence (survives restarts)
+cargo run -- --wal /tmp/toydb.wal
+```
+
+Then interact with your database:
+
+```sql
+toydb> CREATE TABLE users (id INT, name TEXT, age INT)
+toydb> INSERT INTO users VALUES (1, 'Alice', 30)
+toydb> INSERT INTO users VALUES (2, 'Bob', 25)
+toydb> SELECT name, age FROM users WHERE age > 28 ORDER BY age DESC
+toydb> SELECT COUNT(*) FROM users
+toydb> DELETE FROM users WHERE age < 27
+toydb> DROP TABLE users
+```
+
 ## Tips
 
 - **Don't peek at the solution first.** Struggle with the `todo!()` stubs — that's where learning happens.

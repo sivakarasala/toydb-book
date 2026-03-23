@@ -1,0 +1,9 @@
+[package]
+name = "toydb"
+version = "0.1.0"
+edition = "2021"
+description = "A toy distributed SQL database — built chapter by chapter"
+
+[dependencies]
+crc32fast = "1"
+thiserror = "2"
