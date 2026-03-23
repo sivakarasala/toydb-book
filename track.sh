@@ -227,61 +227,8 @@ check_capstone() {
     done
 }
 
-# ─── Streak calculation ──────────────────────────────────────────
+# ─── Streak & Timeline ────────────────────────────────────────────
 show_streak() {
-    local result
-    result=$(python3 -c "
-import json
-from datetime import date, timedelta
-
-with open('$PROGRESS_FILE') as f:
-    data = json.load(f)
-
-log = data.get('activity_log', [])
-if not log:
-    print('0|0|-')
-    exit()
-
-dates = sorted(set(log))
-today = date.today()
-yesterday = today - timedelta(days=1)
-
-# Current streak (today or yesterday counts)
-streak = 0
-check = today
-if today.isoformat() not in dates:
-    check = yesterday
-    if yesterday.isoformat() not in dates:
-        print(f'0|{len(dates)}|{dates[0]}')
-        exit()
-
-while check.isoformat() in dates:
-    streak += 1
-    check -= timedelta(days=1)
-
-print(f'{streak}|{len(dates)}|{dates[0]}')
-" 2>/dev/null || echo "0|0|-")
-
-    IFS='|' read -r streak total_days start_date <<< "$result"
-
-    echo -e "\n${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
-
-    if [[ "$streak" -gt 0 ]]; then
-        # Fire emoji intensity based on streak length
-        local fire=""
-        if [[ "$streak" -ge 7 ]]; then
-            fire="🔥🔥🔥"
-        elif [[ "$streak" -ge 3 ]]; then
-            fire="🔥🔥"
-        else
-            fire="🔥"
-        fi
-        echo -e "  ${fire} ${BOLD}Streak: ${streak} day(s)${RESET}  ${DIM}|  ${total_days} total days  |  Since ${start_date}${RESET}"
-    else
-        echo -e "  ${YELLOW}No active streak${RESET} — commit some code today to start one!"
-    fi
-
-    # Show last 7 days activity
     python3 -c "
 import json
 from datetime import date, timedelta
@@ -289,27 +236,95 @@ from datetime import date, timedelta
 with open('$PROGRESS_FILE') as f:
     data = json.load(f)
 
-log = set(data.get('activity_log', []))
+log = sorted(set(data.get('activity_log', [])))
 today = date.today()
 
-days = []
+# ── Streak ──
+streak = 0
+if log:
+    dates_set = set(log)
+    check = today
+    if today.isoformat() not in dates_set:
+        check = today - timedelta(days=1)
+        if check.isoformat() not in dates_set:
+            check = None
+    if check:
+        while check.isoformat() in dates_set:
+            streak += 1
+            check -= timedelta(days=1)
+
+# Fire emoji
+fire = ''
+if streak >= 7: fire = '🔥🔥🔥'
+elif streak >= 3: fire = '🔥🔥'
+elif streak > 0: fire = '🔥'
+
+# ── Timeline ──
+start_str = data.get('start_date', today.isoformat())
+target_str = data.get('target_date', (today + timedelta(weeks=12)).isoformat())
+start = date.fromisoformat(start_str)
+target = date.fromisoformat(target_str)
+total_plan_days = (target - start).days or 1
+elapsed = (today - start).days
+remaining = max(0, (target - today).days)
+weeks_elapsed = elapsed / 7
+weeks_total = total_plan_days / 7
+pct_time = min(100, elapsed * 100 // total_plan_days)
+
+# Progress vs time
+ex = sum(1 for v in data.get('exercises', {}).values() if v == 'pass')
+cu = sum(1 for v in data.get('cumulative', {}).values() if v == 'active')
+ca = sum(1 for v in data.get('capstone', {}).values() if v == 'pass')
+total_done = ex + cu + ca
+total_all = 38
+pct_done = total_done * 100 // total_all if total_all > 0 else 0
+
+if pct_done >= pct_time:
+    pace = '✅ On track'
+elif pct_done >= pct_time - 15:
+    pace = '⚠️  Slightly behind'
+else:
+    pace = '🏃 Behind — consider extra time this week'
+
+# ── 7-day activity ──
+days_display = ''
+labels_display = ''
 for i in range(6, -1, -1):
     d = today - timedelta(days=i)
-    if d.isoformat() in log:
-        days.append('█')
-    else:
-        days.append('░')
+    days_display += ('█ ' if d.isoformat() in set(log) else '░ ')
+    labels_display += (d.strftime('%a')[0] + ' ')
 
-labels = []
-for i in range(6, -1, -1):
-    d = today - timedelta(days=i)
-    labels.append(d.strftime('%a')[0])
+# ── Print ──
+print()
+print('━' * 48)
+print()
 
-print(f'  Last 7 days: {\" \".join(days)}')
-print(f'               {\" \".join(labels)}')
+# Timeline
+print(f'  Started: {start_str}  →  Target: {target_str}')
+print(f'  Day {elapsed} of {total_plan_days}  |  Week {weeks_elapsed:.0f} of {weeks_total:.0f}  |  {remaining} days left')
+
+# Time bar
+tw = 30
+tf = min(tw, elapsed * tw // total_plan_days)
+te = tw - tf
+tbar = '▓' * tf + '░' * te
+print(f'  {tbar}  {pct_time}% time elapsed')
+
+# Pace
+print(f'  Progress: {pct_done}% done vs {pct_time}% time  →  {pace}')
+print()
+
+# Streak
+if streak > 0:
+    print(f'  {fire} Streak: {streak} day(s)  |  {len(log)} total active days')
+else:
+    print(f'  No active streak — commit some code today to start one!')
+
+print(f'  Last 7 days: {days_display.strip()}')
+print(f'               {labels_display.strip()}')
+print()
+print('━' * 48)
 " 2>/dev/null
-
-    echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 }
 
 # ─── Progress bar drawing ─────────────────────────────────────────
@@ -401,12 +416,35 @@ if log:
         streak += 1
         check -= timedelta(days=1)
 
+# Timeline
+start_str = data.get('start_date', today.isoformat())
+target_str = data.get('target_date', (today + timedelta(weeks=12)).isoformat())
+start = date.fromisoformat(start_str)
+target = date.fromisoformat(target_str)
+total_plan_days = (target - start).days or 1
+elapsed = (today - start).days
+remaining = max(0, (target - today).days)
+weeks_elapsed = elapsed / 7
+weeks_total = total_plan_days / 7
+pct_time = min(100, elapsed * 100 // total_plan_days)
+
+if pct >= pct_time:
+    pace = '✅ On track'
+elif pct >= pct_time - 15:
+    pace = '⚠️  Slightly behind'
+else:
+    pace = '🏃 Behind — consider extra time this week'
+
 # Progress bar helper
 def bar(done, total, width=20):
     if total == 0:
         return '░' * width
     filled = done * width // total
     return '█' * filled + '░' * (width - filled)
+
+def time_bar(elapsed, total, width=20):
+    filled = min(width, elapsed * width // total) if total > 0 else 0
+    return '▓' * filled + '░' * (width - filled)
 
 # 7-day activity
 days_display = ''
@@ -466,6 +504,23 @@ fire = '🔥' * min(streak // 3 + 1, 3) if streak > 0 else ''
 md = f'''# My toydb-book Progress
 
 > Auto-generated by \`track.sh\` — last updated {today.isoformat()}
+
+## Timeline
+
+| | |
+|---|---|
+| **Started** | {start_str} |
+| **Target** | {target_str} ({int(weeks_total)} weeks) |
+| **Day** | {elapsed} of {total_plan_days} |
+| **Week** | {weeks_elapsed:.0f} of {weeks_total:.0f} |
+| **Remaining** | {remaining} days |
+
+\`\`\`
+Time:     {time_bar(elapsed, total_plan_days, 30)}  {pct_time}%
+Progress: {bar(total_done, total_all, 30)}  {pct}%
+\`\`\`
+
+**Pace: {pace}**
 
 ## Overall
 
