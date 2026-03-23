@@ -15,3 +15,7 @@ preferred-dark-theme = "coal"
 git-repository-url = "https://github.com/sivakarasala/toydb-book"
 edit-url-template = "https://github.com/sivakarasala/toydb-book/edit/main/src/{path}"
 site-url = "/"
+
+[output.html.fold]
+enable = true
+level = 0
