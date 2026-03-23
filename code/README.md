@@ -112,7 +112,34 @@ cargo test --bin c1-solution
 
 ## The Full Database: `code/toydb/`
 
-After completing all chapters, everything comes together in a single integrated crate:
+The per-chapter exercises teach concepts in isolation. The `toydb` crate is where you bring them all together into a **real, working database**.
+
+### How to build it yourself
+
+The recommended workflow is: **finish the chapter exercise first, then add that layer to toydb.**
+
+| After Chapter | What to add to `code/toydb/` |
+|--------------|------------------------------|
+| Ch 1-2 | Create the project. Add `src/storage/mod.rs` (Storage trait) and `src/storage/memory.rs` (BTreeMap engine). Your database can store and retrieve key-value pairs. |
+| Ch 3 | Add `src/error.rs` with a proper error enum using `thiserror`. Refactor Storage methods to return `Result`. |
+| Ch 6 | Add `src/sql/lexer.rs`. Your database can now tokenize SQL strings. |
+| Ch 7 | Add `src/sql/parser.rs`. Tokens become an AST — CREATE TABLE, INSERT, SELECT are now structured data. |
+| Ch 8-9 | Add `src/sql/planner.rs`. The AST becomes an execution plan with filter expressions. |
+| Ch 10-11 | Add `src/sql/executor.rs` and `src/sql/types.rs`. **This is the big milestone** — your database can now actually execute SQL queries against stored data. |
+| Ch 12-13 | (Optional) Add a TCP server so clients can connect over the network. |
+| Ch 14-16 | Add `src/raft/mod.rs` and `src/raft/wal.rs`. Every SQL command is logged to a WAL before execution. Your database now survives crashes. |
+| Ch 17 | Add `src/lib.rs` (Database struct) and `src/main.rs` (REPL). Wire all layers together. |
+| Ch 18 | Add integration tests that exercise the full pipeline. |
+
+At each step, run `cargo build` to make sure everything compiles, and `cargo test` to verify your layers work together.
+
+### The reference implementation
+
+The `code/toydb/` directory contains a **complete reference implementation** — the finished product after all 18 chapters. You can use it to:
+
+- **Compare your work** — see how your implementation differs from the reference
+- **Get unstuck** — if you're stuck wiring layers together, peek at how the reference does it
+- **Run it immediately** — try the full database before you build it yourself
 
 ```
 code/toydb/
@@ -134,7 +161,7 @@ code/toydb/
 │       └── wal.rs        ← Write-ahead log (Ch16)
 ```
 
-Run it:
+### Running the reference
 
 ```bash
 cd code/toydb
