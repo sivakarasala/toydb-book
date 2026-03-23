@@ -1,0 +1,10 @@
+[package]
+name = "my-toydb"
+version = "0.1.0"
+edition = "2021"
+description = "My toy SQL database — built chapter by chapter"
+
+# Uncomment dependencies as you need them:
+[dependencies]
+# crc32fast = "1"    # Ch 16: WAL checksums
+# thiserror = "2"    # Ch 3: Error handling

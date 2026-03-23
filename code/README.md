@@ -112,28 +112,33 @@ cargo test --bin c1-solution
 
 ## The Full Database: `code/toydb/`
 
-The per-chapter exercises teach concepts in isolation. The `toydb` crate is where you bring them all together into a **real, working database**.
+The per-chapter exercises teach concepts in isolation. The `my-toydb` crate is where you bring them all together into a **real, working database**.
 
 ### How to build it yourself
 
-The recommended workflow is: **finish the chapter exercise first, then add that layer to toydb.**
+A starter skeleton is already set up at `code/my-toydb/`. Every file has a `// TODO` stub and a reference pointer to `code/toydb/`. The recommended workflow is: **finish the chapter exercise first, then fill in the corresponding file in `my-toydb/`.**
 
-| After Chapter | What to add to `code/toydb/` |
+```bash
+cd code/my-toydb
+cargo build   # Compiles out of the box — all modules are commented out
+```
+
+| After Chapter | What to fill in (`code/my-toydb/src/`) |
 |--------------|------------------------------|
-| Ch 1-2 | Create the project. Add `src/storage/mod.rs` (Storage trait) and `src/storage/memory.rs` (BTreeMap engine). Your database can store and retrieve key-value pairs. |
-| Ch 3 | Add `src/error.rs` with a proper error enum using `thiserror`. Refactor Storage methods to return `Result`. |
-| Ch 6 | Add `src/sql/lexer.rs`. Your database can now tokenize SQL strings. |
-| Ch 7 | Add `src/sql/parser.rs`. Tokens become an AST — CREATE TABLE, INSERT, SELECT are now structured data. |
-| Ch 8-9 | Add `src/sql/planner.rs`. The AST becomes an execution plan with filter expressions. |
-| Ch 10-11 | Add `src/sql/executor.rs` and `src/sql/types.rs`. **This is the big milestone** — your database can now actually execute SQL queries against stored data. |
+| Ch 1-2 | Uncomment `storage` in `lib.rs`. Fill in `storage/mod.rs` (Storage trait) and `storage/memory.rs` (BTreeMap engine). Your database can store and retrieve key-value pairs. |
+| Ch 3 | Uncomment `error` in `lib.rs`. Fill in `error.rs` with a proper error enum using `thiserror`. Refactor Storage methods to return `Result`. |
+| Ch 6 | Uncomment `sql` in `lib.rs`. Fill in `sql/lexer.rs`. Your database can now tokenize SQL strings. |
+| Ch 7 | Fill in `sql/parser.rs`. Tokens become an AST — CREATE TABLE, INSERT, SELECT are now structured data. |
+| Ch 8-9 | Fill in `sql/planner.rs`. The AST becomes an execution plan with filter expressions. |
+| Ch 10-11 | Fill in `sql/executor.rs` and `sql/types.rs`. **This is the big milestone** — your database can now actually execute SQL queries against stored data. |
 | Ch 12-13 | (Optional) Add a TCP server so clients can connect over the network. |
-| Ch 14-16 | Add `src/raft/mod.rs` and `src/raft/wal.rs`. Every SQL command is logged to a WAL before execution. Your database now survives crashes. |
-| Ch 17 | Add `src/lib.rs` (Database struct) and `src/main.rs` (REPL). Wire all layers together. |
+| Ch 14-16 | Uncomment `raft` in `lib.rs`. Fill in `raft/mod.rs` and `raft/wal.rs`. Every SQL command is logged to a WAL before execution. Your database now survives crashes. |
+| Ch 17 | Fill in `lib.rs` (Database struct) and `main.rs` (REPL). Wire all layers together. |
 | Ch 18 | Add integration tests that exercise the full pipeline. |
 
 At each step, run `cargo build` to make sure everything compiles, and `cargo test` to verify your layers work together.
 
-### The reference implementation
+### The reference implementation (`code/toydb/`)
 
 The `code/toydb/` directory contains a **complete reference implementation** — the finished product after all 18 chapters. You can use it to:
 
@@ -160,6 +165,34 @@ code/toydb/
 │       ├── mod.rs        ← Raft log + recovery (Ch14-16)
 │       └── wal.rs        ← Write-ahead log (Ch16)
 ```
+
+### Your starter skeleton (`code/my-toydb/`)
+
+The `code/my-toydb/` directory mirrors the same structure with `// TODO` stubs:
+
+```
+code/my-toydb/
+├── Cargo.toml            ← Dependencies commented out — uncomment as needed
+├── src/
+│   ├── main.rs           ← Prints milestones (replace with REPL at Ch17)
+│   ├── lib.rs            ← All modules commented out — uncomment as you build
+│   ├── error.rs          ← TODO: Error types (Ch3)
+│   ├── storage/
+│   │   ├── mod.rs        ← TODO: Storage trait (Ch2)
+│   │   └── memory.rs     ← TODO: BTreeMap engine (Ch1-2)
+│   ├── sql/
+│   │   ├── mod.rs        ← Module declarations
+│   │   ├── types.rs      ← TODO: Value, Schema types (Ch10)
+│   │   ├── lexer.rs      ← TODO: Tokenizer (Ch6)
+│   │   ├── parser.rs     ← TODO: AST builder (Ch7)
+│   │   ├── planner.rs    ← TODO: Query planner (Ch8-9)
+│   │   └── executor.rs   ← TODO: Executor (Ch10-11)
+│   └── raft/
+│       ├── mod.rs        ← TODO: Raft log (Ch14-16)
+│       └── wal.rs        ← TODO: Write-ahead log (Ch16)
+```
+
+Each TODO file has a doc comment pointing to the corresponding file in `code/toydb/` for reference.
 
 ### Running the reference
 

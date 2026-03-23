@@ -35,6 +35,7 @@ toydb> SELECT name, age FROM users WHERE age > 28 ORDER BY age DESC
 ```bash
 git clone https://github.com/sivakarasala/toydb-book.git
 cd toydb-book
+./setup.sh            # installs progress tracker (one-time)
 cargo install mdbook
 mdbook serve --open
 ```
@@ -86,19 +87,18 @@ Repeat for ch02, ch03, ... ch18.
 
 ### Step 4: Build your own database (the cumulative project)
 
-After each chapter exercise, add that layer to your own toydb:
+A starter skeleton is already waiting for you at `code/my-toydb/`:
 
 ```bash
-# After Ch1-2: Create your project
-cargo new my-toydb
-cd my-toydb
+cd code/my-toydb
+cargo build   # Compiles out of the box — all modules are commented out
 
-# Add src/storage/mod.rs (Storage trait)
-# Add src/storage/memory.rs (BTreeMap engine)
-cargo build  # Should compile!
+# After each chapter, uncomment the next module in src/lib.rs
+# and replace the todo!() stubs with your implementation.
+# See code/toydb/ for the reference implementation when you get stuck.
 ```
 
-The [code/README.md](code/README.md) has a complete table showing which files to add after each chapter.
+The [code/README.md](code/README.md) has a complete table showing which files to fill in after each chapter.
 
 ### Step 5: Read DDIA alongside (optional)
 
@@ -135,6 +135,41 @@ For each chapter (1-18):
   5. DS Deep Dive:        read the linked narrative for that chapter
 ```
 
+## Progress Tracking
+
+Your progress is tracked automatically after every `git commit`:
+
+```
+Chapter Exercises  ████████░░░░░░░░░░  8/18 (44%)
+Cumulative Project █████░░░░░░░░░░░░░  3/12 layers
+Capstone           ░░░░░░░░░░░░░░░░░░  0/8
+
+🔥 Streak: 5 days
+Last 7 days: ░ █ █ █ █ █ ░
+             T W T F S S M
+```
+
+**How it works:**
+
+1. `./setup.sh` creates a personal `progress/your-name` branch and installs a post-commit hook
+2. Every time you `git commit`, the hook runs `track.sh` and shows your progress in the terminal
+3. A `PROGRESS.md` file is auto-generated and included in your commit — push your branch to see it on GitHub
+4. The `main` branch stays clean — your work only lives on your personal branch
+
+**Check progress anytime:**
+
+```bash
+./track.sh          # full check (runs cargo test per chapter)
+./track.sh --quick  # fast check (checks for todo!() markers)
+```
+
+**Pull book updates without losing your progress:**
+
+```bash
+git fetch origin main
+git merge origin/main
+```
+
 ## Two Learning Tracks
 
 | Track | For | Starts At |
@@ -161,6 +196,7 @@ toydb-book/
 │   ├── ch01/ ... ch18/           ← Exercise + solution crates (per chapter)
 │   ├── capstone/                 ← 8 DSA challenges (exercise + solution)
 │   ├── toydb/                    ← Complete reference database (REPL + all layers)
+│   ├── my-toydb/                 ← Your starter skeleton (fill in as you learn)
 │   └── README.md                 ← How to work through the code
 ```
 
