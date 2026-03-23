@@ -59,6 +59,12 @@
 
 ---
 
+# Companion Reading
+
+- [DDIA Companion — Reading Guide](ddia-companion.md)
+
+---
+
 # Software Design
 
 - [Design Reflection — A Philosophy of Software Design](ch18-5-design-reflection.md)
