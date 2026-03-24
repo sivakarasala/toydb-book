@@ -14,12 +14,66 @@
 ///
 /// When you're ready for the REPL (Ch17), look at:
 ///   ../toydb/src/main.rs
-
 use std::collections::HashMap;
 use std::io::{self, Write};
 
+use std::fmt;
+
+#[derive(Debug, Clone)]
+enum Value {
+    String(String),
+    Integer(i64),
+    Float(f64),
+    Boolean(bool),
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::String(s) => write!(f, "{}", s),
+            Value::Integer(n) => write!(f, "{}", n),
+            Value::Float(n) => write!(f, "{}", n),
+            Value::Boolean(b) => write!(f, "{}", b),
+        }
+    }
+}
+
+impl Value {
+    fn type_name(&self) -> &str {
+        match self {
+            Value::String(_) => "string",
+            Value::Integer(_) => "integer",
+            Value::Float(_) => "float",
+            Value::Boolean(_) => "boolean",
+        }
+    }
+
+    fn parse(input: &str) -> Self {
+        // Try boolean first
+        if input.eq_ignore_ascii_case("true") {
+            return Value::Boolean(true);
+        }
+        if input.eq_ignore_ascii_case("false") {
+            return Value::Boolean(false);
+        }
+
+        // Try integer
+        if let Ok(n) = input.parse::<i64>() {
+            return Value::Integer(n);
+        }
+
+        // Try float
+        if let Ok(n) = input.parse::<f64>() {
+            return Value::Float(n);
+        }
+
+        // Default to string
+        Value::String(input.to_string())
+    }
+}
+
 struct Database {
-    data: HashMap<String, String>,
+    data: HashMap<String, Value>,
 }
 
 impl Database {
@@ -29,11 +83,11 @@ impl Database {
         }
     }
 
-    fn set(&mut self, key: String, value: String) {
+    fn set(&mut self, key: String, value: Value) {
         self.data.insert(key, value);
     }
 
-    fn get(&self, key: &str) -> Option<&String> {
+    fn get(&self, key: &str) -> Option<&Value> {
         self.data.get(key)
     }
 
@@ -41,7 +95,7 @@ impl Database {
         self.data.remove(key).is_some()
     }
 
-    fn list(&self) -> Vec<(&String, &String)> {
+    fn list(&self) -> Vec<(&String, &Value)> {
         self.data.iter().collect()
     }
 }
@@ -81,7 +135,7 @@ fn main() {
                     continue;
                 }
                 let key = parts[1].to_string();
-                let value = parts[2].to_string();
+                let value = Value::parse(parts[2]);
                 db.set(key, value);
                 println!("OK");
             }
@@ -91,7 +145,7 @@ fn main() {
                     continue;
                 }
                 match db.get(parts[1]) {
-                    Some(value) => println!("{}", value),
+                    Some(value) => println!("({}) {}", value.type_name(), value),
                     None => println!("(nil)"),
                 }
             }
@@ -112,7 +166,7 @@ fn main() {
                     println!("(empty)");
                 } else {
                     for (key, value) in entries {
-                        println!("{} = {}", key, value);
+                        println!("{} = ({}) {}", key, value.type_name(), value);
                     }
                 }
             }
@@ -130,7 +184,10 @@ fn main() {
                 break;
             }
             _ => {
-                println!("Unknown command: '{}'. Type HELP for available commands.", parts[0])
+                println!(
+                    "Unknown command: '{}'. Type HELP for available commands.",
+                    parts[0]
+                )
             }
         }
     }
