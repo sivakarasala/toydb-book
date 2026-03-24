@@ -16,6 +16,7 @@
 ///   ../toydb/src/main.rs
 
 use std::collections::HashMap;
+use std::io::{self, Write};
 
 struct Database {
     data: HashMap<String, String>,
@@ -48,20 +49,89 @@ impl Database {
 fn main() {
     let mut db = Database::new();
 
-    db.set("name".to_string(), "toydb".to_string());
-    db.set("version".to_string(), "0.1.0".to_string());
-    db.set("language".to_string(), "Rust".to_string());
+    println!("toydb v0.1.0");
+    println!("Type HELP for available commands.\n");
 
-    println!("GET name = {:?}", db.get("name"));
-    println!("GET missing = {:?}", db.get("missing"));
+    loop {
+        print!("toydb> ");
+        io::stdout().flush().unwrap();
 
-    println!("\nAll keys:");
-    for (key, value) in db.list() {
-        println!(" {} = {}", key, value);
+        let mut input = String::new();
+        match io::stdin().read_line(&mut input) {
+            Ok(0) => break, // EOF (Ctrl+D)
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Error reading input: {}", e);
+                continue;
+            }
+        }
+
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+
+        let parts: Vec<&str> = input.splitn(3, ' ').collect();
+        let command = parts[0].to_uppercase();
+
+        match command.as_str() {
+            "SET" => {
+                if parts.len() < 3 {
+                    println!("Usage: SET <key> <value>");
+                    continue;
+                }
+                let key = parts[1].to_string();
+                let value = parts[2].to_string();
+                db.set(key, value);
+                println!("OK");
+            }
+            "GET" => {
+                if parts.len() < 2 {
+                    println!("Usage: GET <key>");
+                    continue;
+                }
+                match db.get(parts[1]) {
+                    Some(value) => println!("{}", value),
+                    None => println!("(nil)"),
+                }
+            }
+            "DELETE" => {
+                if parts.len() < 2 {
+                    println!("Usage: DELETE <key>");
+                    continue;
+                }
+                if db.delete(parts[1]) {
+                    println!("OK");
+                } else {
+                    println!("(nil)");
+                }
+            }
+            "LIST" => {
+                let entries = db.list();
+                if entries.is_empty() {
+                    println!("(empty)");
+                } else {
+                    for (key, value) in entries {
+                        println!("{} = {}", key, value);
+                    }
+                }
+            }
+            "HELP" => {
+                println!("Commands:");
+                println!(" SET <key> <value> - store a key-value pair");
+                println!(" GET <key>         - retrieve a value by key");
+                println!(" DELETE <key>      - remove a key-value pair");
+                println!(" LIST              - show all key-value pairs");
+                println!(" HELP              - show this message");
+                println!(" EXIT              - quit");
+            }
+            "EXIT" | "QUIT" => {
+                println!("Bye!");
+                break;
+            }
+            _ => {
+                println!("Unknown command: '{}'. Type HELP for available commands.", parts[0])
+            }
+        }
     }
-
-    let deleted = db.delete("version");
-    println!("\nDELETE version: {}", deleted);
-    println!("GET version = {:?}", db.get("version"));
-
 }
