@@ -15,9 +15,10 @@
 /// When you're ready for the REPL (Ch17), look at:
 ///   ../toydb/src/main.rs
 use std::collections::HashMap;
+use std::fmt;
 use std::io::{self, Write};
 
-use std::fmt;
+// --- Value type ---
 
 #[derive(Debug, Clone)]
 enum Value {
@@ -72,33 +73,72 @@ impl Value {
     }
 }
 
+// --- Operation statistics ---
+
+struct OperationStats {
+    gets: usize,
+    sets: usize,
+    deletes: usize,
+}
+
+impl OperationStats {
+    fn new() -> Self {
+        Self {
+            gets: 0,
+            sets: 0,
+            deletes: 0,
+        }
+    }
+
+    fn total(&self) -> usize {
+        self.gets + self.sets + self.deletes
+    }
+}
+
+// --- Database ---
+
 struct Database {
     data: HashMap<String, Value>,
+    stats: OperationStats,
 }
 
 impl Database {
     fn new() -> Self {
         Self {
             data: HashMap::new(),
+            stats: OperationStats::new(),
         }
     }
 
     fn set(&mut self, key: String, value: Value) {
         self.data.insert(key, value);
+        self.stats.sets += 1;
     }
 
-    fn get(&self, key: &str) -> Option<&Value> {
+    fn get(&mut self, key: &str) -> Option<&Value> {
+        self.stats.gets += 1;
         self.data.get(key)
     }
 
     fn delete(&mut self, key: &str) -> bool {
+        self.stats.deletes += 1;
         self.data.remove(key).is_some()
     }
 
     fn list(&self) -> Vec<(&String, &Value)> {
         self.data.iter().collect()
     }
+
+    fn stats(&self) -> &OperationStats {
+        &self.stats
+    }
+
+    fn entry_count(&self) -> usize {
+        self.data.len()
+    }
 }
+
+// --- REPL ---
 
 fn main() {
     let mut db = Database::new();
@@ -144,8 +184,11 @@ fn main() {
                     println!("Usage: GET <key>");
                     continue;
                 }
-                match db.get(parts[1]) {
-                    Some(value) => println!("({}) {}", value.type_name(), value),
+                let result = db
+                    .get(parts[1])
+                    .map(|v| format!("({}) {}", v.type_name(), v));
+                match result {
+                    Some(display) => println!("{}", display),
                     None => println!("(nil)"),
                 }
             }
@@ -170,6 +213,16 @@ fn main() {
                     }
                 }
             }
+            "STATS" => {
+                let stats = db.stats();
+                println!("--- toydb statistics ---");
+                println!("  Keys stored:        {}", db.entry_count());
+                println!("  SET operations:     {}", stats.sets);
+                println!("  GET operations:     {}", stats.gets);
+                println!("  DEL operations:     {}", stats.deletes);
+                println!("  Total ops:          {}", stats.total());
+                println!("------------------------");
+            }
             "HELP" => {
                 println!("Commands:");
                 println!(" SET <key> <value> - store a key-value pair");
@@ -187,7 +240,7 @@ fn main() {
                 println!(
                     "Unknown command: '{}'. Type HELP for available commands.",
                     parts[0]
-                )
+                );
             }
         }
     }
