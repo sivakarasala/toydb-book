@@ -14,14 +14,23 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Null,
-    // TODO: Add Bool, Int, Float, String variants
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
 }
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // TODO: Display each variant nicely
         // Null → "NULL", Bool → "true"/"false", Int → number, Float → number, String → the string
-        todo!("Implement Display for Value")
+        match self {
+            Value::String(s) => write!(f, "{}", s),
+            Value::Int(n) => write!(f, "{}", n),
+            Value::Float(n) => write!(f, "{}", n),
+            Value::Bool(b) => write!(f, "{}", b),
+            Value::Null => write!(f, "NULL"),
+        }
     }
 }
 
@@ -42,25 +51,25 @@ impl KvStore {
     /// Insert or update a key-value pair.
     pub fn set(&mut self, key: &str, value: Value) {
         // TODO: Insert the key-value pair into self.data
-        todo!("Implement set")
+        self.data.insert(key.to_string(), value);
     }
 
     /// Retrieve a value by key.
     pub fn get(&self, key: &str) -> Option<&Value> {
         // TODO: Look up the key in self.data
-        todo!("Implement get")
+        self.data.get(key)
     }
 
     /// Delete a key-value pair. Returns the old value if it existed.
     pub fn delete(&mut self, key: &str) -> Option<Value> {
         // TODO: Remove the key from self.data
-        todo!("Implement delete")
+        self.data.remove(key)
     }
 
     /// Return the number of stored entries.
     pub fn len(&self) -> usize {
         // TODO: Return the count of entries
-        todo!("Implement len")
+        self.data.len()
     }
 }
 
