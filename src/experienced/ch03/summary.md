@@ -16,7 +16,7 @@ Your data now survives restarts. The `LogStorage` engine is a simplified version
 
 Ready to go deeper? This chapter's data structure deep dive explores log-structured storage from first principles — why appending is the most natural way to write to magnetic platters and flash cells, and how LSM trees evolved from the same idea.
 
-**-> [Log-Structured Storage — "Append only, ask questions later"](../ds-narratives/ch03-log-structured-storage.md)**
+**-> [Log-Structured Storage — "Append only, ask questions later"](../../ds-narratives/ch03-log-structured-storage.md)**
 
 ---
 

@@ -17,7 +17,7 @@ The planner is the third stage in the SQL pipeline: Lexer -> Parser -> Planner. 
 
 Ready to go deeper? This chapter's data structure deep dive explores tree transformations in detail — building a generic tree mapper, comparing pre-order vs post-order transforms, and showing how compiler passes use the same AST-to-IR pattern that our planner uses.
 
-**-> [Tree Transformations: AST to Plan](../ds-narratives/ch08-tree-transformations.md)**
+**-> [Tree Transformations: AST to Plan](../../ds-narratives/ch08-tree-transformations.md)**
 
 ---
 

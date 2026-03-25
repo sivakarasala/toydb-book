@@ -17,7 +17,7 @@ But the database still has a critical limitation: if two users read and write at
 
 Serde's derive macros look like magic, but they are built on Rust's procedural macro system — code that writes code. This deep dive explores how proc macros work, the Visitor pattern that serde uses internally, and how to build your own derive macro from scratch.
 
-**-> [Serde Internals & Procedural Macros -- "The Code That Writes Code"](../ds-narratives/ch04-serde-internals.md)**
+**-> [Serde Internals & Procedural Macros -- "The Code That Writes Code"](../../ds-narratives/ch04-binary-serialization.md)**
 
 ---
 

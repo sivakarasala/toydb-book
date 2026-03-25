@@ -18,7 +18,7 @@ Chapter 10 builds the query executor that takes these optimized plans and actual
 
 Our optimizer applies rules in a fixed order: constant folding, then filter pushdown. Production optimizers explore a search space of possible plans and use dynamic programming to find the cheapest one. This deep dive explores the Cascades framework, top-down vs bottom-up optimization, and how cost models combine cardinality estimation with I/O and CPU cost functions.
 
-**-> [Query Optimization Theory -- "The Plan Space Explorer"](../ds-narratives/ch09-query-optimization.md)**
+**-> [Query Optimization Theory -- "The Plan Space Explorer"](../../ds-narratives/ch09-query-plan-optimization.md)**
 
 ---
 

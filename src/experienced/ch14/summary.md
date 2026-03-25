@@ -16,7 +16,7 @@ Your database can now elect a leader among multiple nodes. In Chapter 15, the le
 
 Raft's leader election is one of many approaches to distributed agreement. This deep dive compares Raft with Paxos (the academic gold standard), ZAB (used by ZooKeeper), Viewstamped Replication, and PBFT (for Byzantine faults). We trace the intellectual lineage from Lamport's original Paxos paper through Raft's deliberate simplification, and explore why "understandability" is a valid design goal for consensus algorithms.
 
-**-> [Consensus Algorithms — "The Council Chamber"](../ds-narratives/ch14-consensus-algorithms.md)**
+**-> [Consensus Algorithms — "The Council Chamber"](../../ds-narratives/ch14-leader-election-state-machine.md)**
 
 ---
 

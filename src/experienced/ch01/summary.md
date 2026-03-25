@@ -16,7 +16,7 @@ Your toydb is ephemeral — close the program and the data is gone. In Chapter 2
 
 Want to go deeper on hash tables? Read the narrative deep dive:
 
-[Hash Table — "The key-value locker room"](../ds-narratives/ch01-hash-table-storage.md)
+[Hash Table — "The key-value locker room"](../../ds-narratives/ch01-hash-table-storage.md)
 
 It covers open addressing vs chaining, load factors, resize strategies, and why Rust chose Robin Hood hashing — all through the lens of building a storage engine.
 
