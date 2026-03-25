@@ -17,7 +17,7 @@ But users do not want to call `set("name", Value::String("Alice"))`. They want t
 
 MVCC snapshot isolation prevents most anomalies but not all. This deep dive explores write skew (the anomaly that snapshot isolation misses), serializable snapshot isolation (SSI), and how PostgreSQL and CockroachDB achieve full serializability without locks.
 
-**-> [MVCC Anomalies & Serializable Snapshot Isolation -- "The Time Travel Paradox"](../ds-narratives/ch05-mvcc-anomalies.md)**
+**-> [MVCC Anomalies & Serializable Snapshot Isolation -- "The Time Travel Paradox"](../../ds-narratives/ch05-mvcc-version-chains.md)**
 
 ---
 

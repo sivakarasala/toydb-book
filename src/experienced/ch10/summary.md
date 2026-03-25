@@ -20,7 +20,7 @@ Chapter 11 extends the executor with operators for the hard parts: joins (combin
 
 Our executor evaluates expressions by walking the `Expression` tree recursively. Production databases compile expressions into bytecode or machine code for faster evaluation. This deep dive explores expression compilation, JIT (just-in-time) compilation in databases, and how the tradeoff between interpretation and compilation changes based on query complexity and data volume.
 
-**-> [Expression Evaluation — "The Row Assembly Line"](../ds-narratives/ch10-expression-evaluation.md)**
+**-> [Expression Evaluation — "The Row Assembly Line"](../../ds-narratives/ch10-iterator-volcano.md)**
 
 ---
 

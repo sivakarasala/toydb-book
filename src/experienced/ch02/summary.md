@@ -15,7 +15,7 @@ Your database can store and retrieve key-value pairs, scan ranges in sorted orde
 
 Ready to go deeper? This chapter's data structure deep dive explores the B-tree — the data structure that powers your `BTreeMap` and nearly every database index in production.
 
-**-> [B-Tree -- "The filing cabinet that sorts itself"](../ds-narratives/ch02-b-tree.md)**
+**-> [B-Tree -- "The filing cabinet that sorts itself"](../../ds-narratives/ch02-b-tree.md)**
 
 You used `BTreeMap` as a black box. This deep dive opens the box: node structure, key splitting, tree rebalancing, and why B-trees are cache-friendly. You will understand why databases chose this structure fifty years ago and why they still choose it today.
 

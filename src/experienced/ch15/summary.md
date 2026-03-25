@@ -19,7 +19,7 @@ Chapter 16 adds durability — persisting the log and Raft state to disk so that
 
 The Raft log is a specific instance of a broader concept: replicated state machines. This deep dive explores the theory of state machine replication (Schneider 1990), compares it with operation-based and state-based replication, and traces how the same idea appears in database WALs, event sourcing systems, and blockchain. We examine the CAP theorem through the lens of Raft's design choices and discuss why linearizability matters for database correctness.
 
-**-> [Replicated State Machines — "The Copy Room"](../ds-narratives/ch15-replicated-state-machines.md)**
+**-> [Replicated State Machines — "The Copy Room"](../../ds-narratives/ch14-raft-replicated-log.md)**
 
 ---
 

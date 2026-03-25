@@ -17,7 +17,7 @@ Chapter 8 builds the query planner — the component that looks at a parsed AST 
 
 Our parser is a simple recursive descent parser that handles SQL's relatively flat grammar. But parsing theory goes much deeper: context-free grammars, LL and LR parsing, ambiguity resolution, and the Chomsky hierarchy that classifies languages by the computational power needed to parse them. This deep dive explores how parser generators like yacc and ANTLR work, why SQL is not quite context-free, and how Pratt parsing relates to operator-precedence grammars.
 
-**-> [Parsing Theory & Grammars -- "From Tokens to Trees"](../ds-narratives/ch07-parsing-theory.md)**
+**-> [Parsing Theory & Grammars -- "From Tokens to Trees"](../../ds-narratives/ch07-ast-as-tree.md)**
 
 ---
 

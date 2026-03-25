@@ -18,7 +18,7 @@ Chapter 13 makes the server concurrent using async I/O with Tokio, so multiple c
 
 Our protocol sends all result rows in a single response. PostgreSQL streams rows one at a time, which allows cursors — fetching 100 rows, processing them, then fetching the next 100. This deep dive explores streaming protocols, backpressure, and flow control — how the client tells the server to slow down when it cannot process data fast enough.
 
-**-> [Network Protocols — "The Mail Room"](../ds-narratives/ch12-network-protocols.md)**
+**-> [Network Protocols — "The Mail Room"](../../ds-narratives/ch12-tcp-framing.md)**
 
 ---
 

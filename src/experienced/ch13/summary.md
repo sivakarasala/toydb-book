@@ -18,7 +18,7 @@ Chapter 14 introduces distributed consensus with Raft — making your database f
 
 Async I/O is built on operating system primitives — `epoll` (Linux), `kqueue` (macOS), `IOCP` (Windows). These event notification systems tell the runtime which sockets are ready for reading or writing, without blocking. This deep dive explores how Tokio's reactor translates OS events into Rust futures, how the task scheduler decides which future to poll next, and why async Rust compiles to state machines with zero runtime overhead.
 
-**-> [Async Runtimes — "The Air Traffic Controller"](../ds-narratives/ch13-async-runtimes.md)**
+**-> [Async Runtimes — "The Air Traffic Controller"](../../ds-narratives/ch13-concurrent-data-structures.md)**
 
 ---
 

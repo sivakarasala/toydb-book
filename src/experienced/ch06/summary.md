@@ -17,7 +17,7 @@ Chapter 7 builds the parser that converts this token stream into an Abstract Syn
 
 Our hand-written lexer is fine for toydb's small grammar, but production databases like PostgreSQL use more sophisticated techniques. This deep dive explores regular expression compilation to DFAs, the Thompson NFA construction, and how lexer generators like `logos` achieve zero-copy tokenization in Rust.
 
-**-> [Lexer Theory & Automata -- "The Character Assembly Line"](../ds-narratives/ch06-lexer-automata.md)**
+**-> [Lexer Theory & Automata -- "The Character Assembly Line"](../../ds-narratives/ch06-state-machine-lexer.md)**
 
 ---
 

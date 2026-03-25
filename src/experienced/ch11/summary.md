@@ -17,7 +17,7 @@ Your database now handles the core SQL operations that make relational databases
 
 Our hash join builds the hash table in memory. What happens when the hash table does not fit? This deep dive explores grace hash joins, external sorting, and the memory management strategies that let databases handle datasets larger than available RAM.
 
-**-> [External Algorithms — "The Warehouse Overflow"](../ds-narratives/ch11-external-algorithms.md)**
+**-> [External Algorithms — "The Warehouse Overflow"](../../ds-narratives/ch11-hash-joins.md)**
 
 ---
 
